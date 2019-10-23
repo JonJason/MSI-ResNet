@@ -105,8 +105,8 @@ def train_model(ds_name, paths, encoder):
     n_epochs = config.PARAMS["n_epochs"]
 
     # Preparing progbar
-    train_progbar = Progbar(100, stateful_metrics=["loss"])
-    val_progbar = Progbar(40, stateful_metrics=["val_loss"])
+    train_progbar = Progbar(n_train, stateful_metrics=["loss"])
+    val_progbar = Progbar(n_val, stateful_metrics=["val_loss"])
 
     # Preparing 
     loss_fn = tf.keras.losses.KLDivergence()
