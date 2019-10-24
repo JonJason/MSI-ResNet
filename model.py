@@ -7,8 +7,6 @@ from tensorflow.keras import backend
 
 import config
 
-import sys
-
 class MyModel(Model):
     def __init__(self, encoder, ds_name, phase, **kwargs):
         super().__init__(name='aspp_' + encoder, **kwargs)
@@ -27,6 +25,7 @@ class MyModel(Model):
 
         encoder_weights = "imagenet" if (ds_name == "salicon" and phase == "train") else None
 
+        self._encoder_name = encoder
         if (encoder == "atrous_resnet"):
             self.encoder = AtrousResNet50(input_shape=self.input_layer.output_shape[0][1:],
                                             include_top=False, weights= encoder_weights)
@@ -135,12 +134,10 @@ class MyModel(Model):
         max_per_image = tf.reduce_max(maps, axis=(1, 2, 3), keepdims=True)
         return tf.divide(maps, eps + max_per_image, name="output")
 
-if __name__ == "__main__":
-    params = [
-        (1, 1),
-        (3, 4),
-        (3, 8),
-        (3, 12)
-    ]
-    for index, (strides, dilation_rate) in enumerate(params):
-        print(str(index + 1), strides, dilation_rate)
+    def freeze_unfreeze_encoder_trained_layers(self, freeze=True):
+        encoder_name = self._encoder_name
+        if(encoder_name == "atrous_resnet"):
+            n_of_trained_layers = 81
+        
+        for layer in self.encoder.layers[:n_of_trained_layers]:
+            layer.trainable = (not freeze)

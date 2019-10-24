@@ -1,6 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import argparse
-import os, sys
+import os
 import logging
 
 import pprint
@@ -96,17 +96,14 @@ def train_model(ds_name, paths, encoder):
         salicon_weights = paths["weights"] + w_filename_template % (encoder, "salicon")
         if os.path.exists(salicon_weights):
             model.load_weights(salicon_weights)
+            print("Salicon weights are loaded!")
         else:
             raise FileNotFoundError("Please train model on SALICON database first")
         del salicon_weights
-    
+
     model.summary()
 
     n_epochs = config.PARAMS["n_epochs"]
-
-    # Preparing progbar
-    train_progbar = Progbar(n_train, stateful_metrics=["loss"])
-    val_progbar = Progbar(n_val, stateful_metrics=["val_loss"])
 
     # Preparing 
     loss_fn = tf.keras.losses.KLDivergence()
@@ -129,18 +126,18 @@ def train_model(ds_name, paths, encoder):
         print ('Checkpoint restored:\n{}'.format(ckpt_manager.latest_checkpoint))
 
     print(">> Start training model on %s..." % ds_name.upper())
+    if ds_name == "salicon":
+        model.freeze_unfreeze_encoder_trained_layers(True)
     for epoch in range(start_epoch, n_epochs):
+        if ds_name == "salicon" and epoch == 2:
+            model.freeze_unfreeze_encoder_trained_layers(False)
 
-        train_progbar.verbose = 0
-        train_progbar.update(0, [("loss", train_loss.result())])
-        train_progbar.verbose = 1
+        train_progbar = Progbar(n_train, stateful_metrics=["loss"])
         for train_images, train_ground_truths, train_ori_sizes, train_filenames in train_ds:
             train_step(train_images, train_ground_truths, model, loss_fn, train_loss, optimizer)
             train_progbar.add(train_images.shape[0], [("loss", train_loss.result())])
 
-        val_progbar.verbose = 0
-        val_progbar.update(0, [("val_loss", val_loss.result())])
-        val_progbar.verbose = 1
+        val_progbar = Progbar(n_val, stateful_metrics=["val_loss"])
         for val_images, val_ground_truths, val_ori_sizes, val_filenames in val_ds:
             val_step(val_images, val_ground_truths, model, loss_fn, val_loss)
             val_progbar.add(val_images.shape[0], [("val_loss", val_loss.result())])
@@ -171,10 +168,14 @@ def train_model(ds_name, paths, encoder):
             min_index = i
 
     ckpt.restore(ckpt_manager.checkpoints[min_index])
+    print("best result picked -> epoch: %d - val_loss: {}" % (i + 1,
+        ('%.4f' if val_loss_result > 1e-3 else '%.4e') % val_loss_result))
 
     # Saving model's weights
     print(">> Saving model's weights")
-    model.save_weights(paths["weights"] + w_filename_template % (encoder, ds_name))
+    dest_path = paths["weights"] + w_filename_template % (encoder, ds_name)
+    model.save_weights(dest_path)
+    print("weights are saved to:\n%s" % dest_path)
 
 def test_model(ds_name, paths, encoder, categorical=False):
     """The main function for executing network testing. It loads the specified
@@ -198,6 +199,7 @@ def test_model(ds_name, paths, encoder, categorical=False):
     weights = paths["weights"] + w_filename_template % (encoder, ds_name)
     if os.path.exists(weights):
         model.load_weights(weights)
+        print("Salicon weights are loaded!")
     else:
         raise FileNotFoundError("Please train model on %s database first" % ds_name.upper())
     del weights

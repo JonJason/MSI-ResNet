@@ -1,5 +1,4 @@
 import os
-import sys
 
 import math
 import glob
@@ -39,7 +38,7 @@ def load_train_dataset(ds_name, data_path):
         parent_path = os.path.dirname(os.path.dirname(data_path))
         parent_path = os.path.join(parent_path, "")
 
-        # download.download_dataset(parent_path)
+        download.download_dataset(ds_name, parent_path)
     
     # loading dataset
     train_x = _get_file_list(train_imgs_dir, category_depth)

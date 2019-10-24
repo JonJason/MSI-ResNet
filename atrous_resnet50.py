@@ -13,7 +13,6 @@ from __future__ import print_function
 
 import os
 import warnings
-import sys
 
 import tensorflow as tf
 from tensorflow.keras.layers import Input, Activation, Dense
@@ -411,6 +410,5 @@ def AtrousResNet50(include_top=True,
 if __name__ == "__main__":
     x_shape = (240, 320, 3)
     base_model = AtrousResNet50(input_shape=x_shape, include_top=False, weights=None)
-    # for idx, layer in enumerate(base_model.layers):
-    #     print(str(idx + 1) + '.', layer.name)
-    base_model.summary()
+    for idx, layer in enumerate(base_model.layers):
+        print(str(idx) + '.', layer.name, str(layer.trainable))

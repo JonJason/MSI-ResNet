@@ -152,6 +152,16 @@ def download_cat2000(data_path):
     os.remove(data_path + "tmp.zip")
 
     print("done!", flush=True)
+    
+def download_dataset(ds_name, parent_path):
+    downloader = globals().get("download_" + ds_name, None)
+    if downloader is not None:
+        downloader(parent_path)
+    else:
+        raise ValueError('Downloader for dataset "%s" or please specift ' % ds_name +
+                        'the path where the images are stored when running the application.' +
+                        '\n\nPlease run the command below for help:\n\n' +
+                        '\tpython main.py -h')
 
 # TODO: update to your model
 def download_pretrained_weights(data_path, key):
