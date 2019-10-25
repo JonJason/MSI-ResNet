@@ -6,7 +6,7 @@
 
 PARAMS = {
     "n_epochs": 10,
-    "batch_size": 25,
+    "batch_size": 10,
     "learning_rate": 1e-5,
     "encoder": "atrous_resnet"
 }

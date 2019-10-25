@@ -204,27 +204,28 @@ def test_model(ds_name, paths, encoder, categorical=False):
         raise FileNotFoundError("Please train model on %s database first" % ds_name.upper())
     del weights
 
-    # Preparing progbar
-    test_progbar = Progbar(n_test)
 
 
     print(">> Start predicting using model trained on %s..." % ds_name.upper())
     predictions = None
     filenames = None
     ori_sizes = None
+    # Preparing progbar
+    test_progbar = Progbar(n_test)
     for test_images, test_ori_sizes, test_filenames in test_ds:
+        pred = test_step(test_images, model)
         if predictions is None:
-            predictions = test_step(test_images, model)
-            filenames = test_filenames.numpy()
+            predictions = pred
+            filenames = test_filenames
             ori_sizes = test_ori_sizes
         else:
-            tf.concat([predictions, test_step(test_images, model)], axis=0)
-            tf.concat([filenames, test_filenames.numpy()], axis=0)
-            tf.concat([ori_sizes, test_ori_sizes], axis=0)
+            predictions = tf.concat([predictions, pred], axis=0)
+            filenames = tf.concat([filenames, test_filenames], axis=0)
+            ori_sizes = tf.concat([ori_sizes, test_ori_sizes], axis=0)
         test_progbar.add(test_images.shape[0])
     print("Saving Images")
     results_path = paths["results"]
-    for pred, filename, ori_size in zip(predictions, filenames, ori_sizes):
+    for pred, filename, ori_size in zip(predictions, filenames.numpy(), ori_sizes):
         img = data.postprocess_saliency_map(pred, ori_size)
         tf.io.write_file(results_path + filename.decode("utf-8"), img)
 

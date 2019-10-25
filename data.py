@@ -43,14 +43,14 @@ def load_train_dataset(ds_name, data_path):
     # loading dataset
     train_x = _get_file_list(train_imgs_dir, category_depth)
     train_y = _get_file_list(train_maps_dir, category_depth, suffix=sal_map_suffix)
-    _check_consistency(zip(train_x, train_y), n_train)
+    _check_consistency(zip(train_x, train_y), n_train, suffix=sal_map_suffix)
     train_ds = tf.data.Dataset.from_tensor_slices((train_x, train_y))
 
     if has_val:
         train_ds = train_ds.shuffle(n_train, reshuffle_each_iteration=False)
         valid_list_x = _get_file_list(data_path + "stimuli/val", category_depth)
         valid_list_y = _get_file_list(data_path + "maps/val", category_depth, suffix=sal_map_suffix)
-        _check_consistency(zip(valid_list_x, valid_list_y), n_val)
+        _check_consistency(zip(valid_list_x, valid_list_y), n_val, suffix=sal_map_suffix)
 
         val_ds = tf.data.Dataset.from_tensor_slices((valid_list_x, valid_list_y))
         val_ds = val_ds.shuffle(n_val, reshuffle_each_iteration=False)
@@ -113,11 +113,9 @@ def postprocess_saliency_map(saliency_map, target_size):
     if backend.image_data_format() == 'channels_first':
         saliency_map = tf.transpose(saliency_map, (1, 2, 0))
 
-    saliency_map *= 255.0
-    
     saliency_map = _restore_size(saliency_map, target_size)
 
-    saliency_map = tf.image.convert_image_dtype(tf.round(saliency_map), tf.uint8)
+    saliency_map = tf.image.convert_image_dtype(saliency_map, tf.uint8)
 
     saliency_map_jpeg = tf.image.encode_jpeg(saliency_map, "grayscale", quality=100)
 
@@ -139,7 +137,7 @@ def _prepare_image_ds(ds, target_size, category_depth, one_at_a_time=False):
         object: A dataset object that contains the batched and prefetched data
                 instances along with their shapes and file paths.
     """
-    ds = ds.map(lambda *io_paths_pair: _parse_function(io_paths_pair, target_size, category_depth),
+    ds = ds.map(lambda *io_paths_pair: _parse_inputs(io_paths_pair, target_size, category_depth),
                           num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
     batch_size = 1 if one_at_a_time else config.PARAMS["batch_size"]
@@ -149,7 +147,7 @@ def _prepare_image_ds(ds, target_size, category_depth, one_at_a_time=False):
     
     return ds
 
-def _parse_function(io_paths_pair, target_size, category_depth):
+def _parse_inputs(io_paths_pair, target_size, category_depth):
     """This function reads image data dependent on the image type and
        whether it constitutes a stimulus or saliency map. All instances
        are then reshaped and padded to yield the target dimensionality.
@@ -167,18 +165,25 @@ def _parse_function(io_paths_pair, target_size, category_depth):
     """
     
     image_list = []
-    for count, filename in enumerate(io_paths_pair):
+    for i, filename in enumerate(io_paths_pair):
         image_str = tf.io.read_file(filename)
-        channels = 3 if count == 0 else 1
+        channels = 3 if i == 0 else 1 # wether it is the stimuli or the map
 
         image = tf.cond(tf.image.is_jpeg(image_str),
             lambda: tf.image.decode_jpeg(image_str, channels=channels),
             lambda: tf.image.decode_png(image_str, channels=channels))
 
+        # from int value (0 - 255) to float value (0 - 1)
+        image = tf.image.convert_image_dtype(image, tf.float64)
+
         original_size = tf.shape(image)[:2]
 
         image = tf.image.resize_with_pad(image, target_size[0], target_size[1], method=tf.image.ResizeMethod.AREA)
 
+        # if it is the stimuli, transform to 0 - 255 to comply with the input formats
+        if i == 0:
+            image = image * 255
+        
         if backend.image_data_format() == 'channels_first':
             image = tf.transpose(image, (2, 0, 1))
         
@@ -205,7 +210,6 @@ def _restore_size(image, target_size):
                                     method=tf.image.ResizeMethod.BICUBIC,
                                     preserve_aspect_ratio=False)
 
-    image = tf.clip_by_value(image, 0.0, 255.0)
     offset = tf.cast((new_size - target_size) /2, tf.int32)
     
     cropped_image = image[offset[0]:offset[0] + target_size[0], offset[1]:offset[1] + target_size[1]]
@@ -241,7 +245,7 @@ def _get_file_list(data_path, depth=0, suffix=""):
 
     return data_list
 
-def _check_consistency(zipped_file_lists, n_total_files):
+def _check_consistency(zipped_file_lists, n_total_files, suffix=""):
     """A consistency check that makes sure all files could successfully be
        found and stimuli names correspond to the ones of ground truth maps.
 
@@ -254,6 +258,7 @@ def _check_consistency(zipped_file_lists, n_total_files):
     for file_tuple in zipped_file_lists:
         file_names = [os.path.basename(entry) for entry in list(file_tuple)]
         file_names = [os.path.splitext(entry)[0] for entry in file_names]
-        file_names = [entry.replace("_fixMap", "") for entry in file_names if "_fixPts" not in entry]
+        if suffix != "":
+            file_names = [entry.replace(suffix, "") for entry in file_names]
 
         assert len(set(file_names)) == 1, "File name mismatch"
