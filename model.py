@@ -1,6 +1,7 @@
 import tensorflow as tf
 
 from atrous_resnet50 import AtrousResNet50
+from ml_atrous_vgg16 import MultievelAtrousVGG16
 from tensorflow.keras import Model, Input
 from tensorflow.keras.layers import Conv2D, UpSampling2D, InputLayer
 from tensorflow.keras import backend
@@ -9,7 +10,7 @@ import config
 
 class MyModel(Model):
     def __init__(self, encoder, ds_name, phase, **kwargs):
-        super().__init__(name='aspp_' + encoder, **kwargs)
+        super().__init__(name='%s_aspp' % encoder, **kwargs)
         size = config.SPECS[ds_name]["img_size"]
 
         if backend.image_data_format() == 'channels_last':
@@ -27,8 +28,9 @@ class MyModel(Model):
 
         self._encoder_name = encoder
         if (encoder == "atrous_resnet"):
-            self.encoder = AtrousResNet50(input_shape=self.input_layer.output_shape[0][1:],
-                                            include_top=False, weights= encoder_weights)
+            self.encoder = AtrousResNet50(input_shape=self.input_layer.output_shape[0][1:], weights= encoder_weights)
+        elif (encoder == "ml_atrous_vgg"):
+            self.encoder = MultievelAtrousVGG16(input_shape=self.input_layer.output_shape[0][1:], weights= encoder_weights)
         else:
             raise ValueError("encoder %s has not been implemented yet")
         
@@ -138,6 +140,8 @@ class MyModel(Model):
         encoder_name = self._encoder_name
         if(encoder_name == "atrous_resnet"):
             n_of_trained_layers = 81
+        elif(encoder_name == "ml_atrous_vgg"):
+            n_of_trained_layers = 14
         
         for layer in self.encoder.layers[:n_of_trained_layers]:
             layer.trainable = (not freeze)

@@ -38,7 +38,7 @@ def define_paths(current_path, args):
     weights_path = current_path + "/weights/"
     ckpts_path = weights_path + "ckpts/"
 
-    if args.phase == "train":
+    if args.action == "train":
         if args.data not in data_path:
             data_path += args.data + "/"
 
@@ -52,19 +52,20 @@ def define_paths(current_path, args):
     return paths
 
 @tf.function
-def train_step(images, ground_truths, model, loss_fn, train_loss, optimizer):
+def train_step(images, y_true, model, loss_fn, train_loss, optimizer):
     with tf.GradientTape() as tape:
-        predictions = model(images)
-        loss = loss_fn(ground_truths, predictions)
+        y_pred = model(images)
+        loss = loss_fn(y_true, y_pred)
     gradients = tape.gradient(loss, model.trainable_variables)
     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
     train_loss(loss)
+    return y_pred
 
 @tf.function
-def val_step(images, ground_truths, model, loss_fn, val_loss):
-    predictions = model(images)
-    t_loss = loss_fn(ground_truths, predictions)
+def val_step(images, y_true, model, loss_fn, val_loss):
+    y_pred = model(images)
+    t_loss = loss_fn(y_true, y_pred)
 
     val_loss(t_loss)
 
@@ -106,14 +107,14 @@ def train_model(ds_name, paths, encoder):
     n_epochs = config.PARAMS["n_epochs"]
 
     # Preparing 
-    loss_fn = tf.keras.losses.KLDivergence()
+    loss_fn = kl_divergence
     optimizer = tf.keras.optimizers.Adam(config.PARAMS["learning_rate"])
 
     train_loss = tf.keras.metrics.Mean(name="train_loss")
     val_loss = tf.keras.metrics.Mean(name="val_loss")
 
     ckpts_path = paths["ckpts"] + "%s/%s/" % (encoder, ds_name)
-    ckpt = tf.train.Checkpoint(net=model, val_loss=val_loss, optimizer = optimizer)
+    ckpt = tf.train.Checkpoint(net=model, val_loss=val_loss)
     ckpt_manager = tf.train.CheckpointManager(ckpt, ckpts_path, max_to_keep=n_epochs,
                                                 checkpoint_name="model__val_loss__optimizer__ckpt")
     start_epoch = 0
@@ -126,20 +127,20 @@ def train_model(ds_name, paths, encoder):
         print ('Checkpoint restored:\n{}'.format(ckpt_manager.latest_checkpoint))
 
     print(">> Start training model on %s..." % ds_name.upper())
-    if ds_name == "salicon":
+    if ds_name == "salicon" and start_epoch < 2:
         model.freeze_unfreeze_encoder_trained_layers(True)
     for epoch in range(start_epoch, n_epochs):
         if ds_name == "salicon" and epoch == 2:
             model.freeze_unfreeze_encoder_trained_layers(False)
 
         train_progbar = Progbar(n_train, stateful_metrics=["loss"])
-        for train_images, train_ground_truths, train_ori_sizes, train_filenames in train_ds:
-            train_step(train_images, train_ground_truths, model, loss_fn, train_loss, optimizer)
+        for train_images, train_y_true, train_ori_sizes, train_filenames in train_ds:
+            y_pred = train_step(train_images, train_y_true, model, loss_fn, train_loss, optimizer)
             train_progbar.add(train_images.shape[0], [("loss", train_loss.result())])
 
         val_progbar = Progbar(n_val, stateful_metrics=["val_loss"])
-        for val_images, val_ground_truths, val_ori_sizes, val_filenames in val_ds:
-            val_step(val_images, val_ground_truths, model, loss_fn, val_loss)
+        for val_images, val_y_true, val_ori_sizes, val_filenames in val_ds:
+            val_step(val_images, val_y_true, model, loss_fn, val_loss)
             val_progbar.add(val_images.shape[0], [("val_loss", val_loss.result())])
 
         train_loss_result = train_loss.result()
@@ -168,8 +169,8 @@ def train_model(ds_name, paths, encoder):
             min_index = i
 
     ckpt.restore(ckpt_manager.checkpoints[min_index])
-    print("best result picked -> epoch: %d - val_loss: {}" % (i + 1,
-        ('%.4f' if val_loss_result > 1e-3 else '%.4e') % val_loss_result))
+    print("best result picked -> epoch: %d - val_loss: %s" % (min_index + 1,
+        ('%.4f' if min_val_loss > 1e-3 else '%.4e') % min_val_loss))
 
     # Saving model's weights
     print(">> Saving model's weights")
@@ -196,38 +197,47 @@ def test_model(ds_name, paths, encoder, categorical=False):
 
     model = MyModel(encoder, ds_name, "test")
 
-    weights = paths["weights"] + w_filename_template % (encoder, ds_name)
-    if os.path.exists(weights):
-        model.load_weights(weights)
+    weights_path = paths["weights"] + w_filename_template % (encoder, ds_name)
+    if os.path.exists(weights_path):
+        model.load_weights(weights_path)
         print("Salicon weights are loaded!")
     else:
         raise FileNotFoundError("Please train model on %s database first" % ds_name.upper())
-    del weights
+    del weights_path
 
 
 
     print(">> Start predicting using model trained on %s..." % ds_name.upper())
-    predictions = None
+    y_pred = None
     filenames = None
     ori_sizes = None
     # Preparing progbar
     test_progbar = Progbar(n_test)
     for test_images, test_ori_sizes, test_filenames in test_ds:
         pred = test_step(test_images, model)
-        if predictions is None:
-            predictions = pred
+        if y_pred is None:
+            y_pred = pred
             filenames = test_filenames
             ori_sizes = test_ori_sizes
         else:
-            predictions = tf.concat([predictions, pred], axis=0)
+            y_pred = tf.concat([y_pred, pred], axis=0)
             filenames = tf.concat([filenames, test_filenames], axis=0)
             ori_sizes = tf.concat([ori_sizes, test_ori_sizes], axis=0)
         test_progbar.add(test_images.shape[0])
     print("Saving Images")
     results_path = paths["results"]
-    for pred, filename, ori_size in zip(predictions, filenames.numpy(), ori_sizes):
+    for pred, filename, ori_size in zip(y_pred, filenames.numpy(), ori_sizes):
         img = data.postprocess_saliency_map(pred, ori_size)
         tf.io.write_file(results_path + filename.decode("utf-8"), img)
+
+def kl_divergence(y_true, y_pred, eps=1e-7):
+    sum_per_image = tf.reduce_sum(y_true, axis=(1, 2, 3), keepdims=True)
+    y_true /= eps + sum_per_image
+
+    sum_per_image = tf.reduce_sum(y_pred, axis=(1, 2, 3), keepdims=True)
+    y_pred /= eps + sum_per_image
+    loss = y_true * tf.math.log(eps + y_true / (eps + y_pred))
+    return tf.reduce_mean(tf.reduce_sum(loss, axis=(1, 2, 3)))
 
 def main():
     """The main function reads the command line arguments, invokes the
@@ -238,14 +248,14 @@ def main():
     current_path = os.path.dirname(os.path.realpath(__file__))
     default_data_path = current_path + "/data"
 
-    phases_list = ["train", "test"]
+    actions_list = ["train", "test", "summary"]
     datasets_list = ["salicon", "mit1003", "cat2000", "custom"]
 
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument("phase", metavar="PHASE", choices=phases_list,
-                        help="sets the network phase (allowed: train or test)")
+    parser.add_argument("action", metavar="ACTION", choices=actions_list,
+                        help="specify the action (allowed: %s)" % " or ".join(actions_list))
 
     parser.add_argument("-d", "--data", metavar="DATA",
                         choices=datasets_list, default=datasets_list[0],
@@ -265,10 +275,14 @@ def main():
 
     encoder_name = config.PARAMS["encoder"]
 
-    if args.phase == "train":
+    if args.action == "train":
         train_model(args.data, paths, encoder_name)
-    elif args.phase == "test":
+    elif args.action == "test":
         test_model(args.data, paths, encoder_name, args.categorical)
+    elif args.action == "summary":
+        
+        model = MyModel(encoder_name, args.data, "test")
+        model.summary()
 
 
 if __name__ == "__main__":

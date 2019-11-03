@@ -28,9 +28,6 @@ from keras_applications.imagenet_utils import _obtain_input_shape
 
 preprocess_input = imagenet_utils.preprocess_input
 
-WEIGHTS_PATH = ('https://github.com/fchollet/deep-learning-models/'
-                'releases/download/v0.2/'
-                'resnet50_weights_tf_dim_ordering_tf_kernels.h5')
 WEIGHTS_PATH_NO_TOP = ('https://github.com/fchollet/deep-learning-models/'
                        'releases/download/v0.2/'
                        'resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5')
@@ -247,12 +244,10 @@ def conv_block(input_tensor,
     return x
 
 
-def AtrousResNet50(include_top=True,
-             weights='imagenet',
+def AtrousResNet50(weights='imagenet',
              input_tensor=None,
              input_shape=None,
              pooling=None,
-             classes=1000,
              **kwargs):
     """Instantiates the AtrousResNet50 architecture.
 
@@ -261,22 +256,16 @@ def AtrousResNet50(include_top=True,
     the one specified in your Keras config at `~/.keras/keras.json`.
 
     # Arguments
-        include_top: whether to include the fully-connected
-            layer at the top of the network.
         weights: one of `None` (random initialization),
               'imagenet' (pre-training on ImageNet),
               or the path to the weights file to be loaded.
         input_tensor: optional Keras tensor (i.e. output of `Input()`)
             to use as image input for the model.
-        input_shape: optional shape tuple, only to be specified
-            if `include_top` is False (otherwise the input shape
-            has to be `(224, 224, 3)` (with `channels_last` data format)
-            or `(3, 224, 224)` (with `channels_first` data format).
+        input_shape: optional shape tuple.
             It should have exactly 3 inputs channels,
             and width and height should be no smaller than 32.
             E.g. `(200, 200, 3)` would be one valid value.
-        pooling: Optional pooling mode for feature extraction
-            when `include_top` is `False`.
+        pooling: Optional pooling mode for feature extraction.
             - `None` means that the output of the model will be
                 the 4D tensor output of the
                 last convolutional block.
@@ -286,9 +275,6 @@ def AtrousResNet50(include_top=True,
                 the output of the model will be a 2D tensor.
             - `max` means that global max pooling will
                 be applied.
-        classes: optional number of classes to classify images
-            into, only to be specified if `include_top` is True, and
-            if no `weights` argument is specified.
 
     # Returns
         A Keras model instance.
@@ -304,16 +290,12 @@ def AtrousResNet50(include_top=True,
                          '(pre-training on ImageNet), '
                          'or the path to the weights file to be loaded.')
 
-    if weights == 'imagenet' and include_top and classes != 1000:
-        raise ValueError('If using `weights` as `"imagenet"` with `include_top`'
-                         ' as true, `classes` should be 1000')
-
     # Determine proper input shape
     input_shape = _obtain_input_shape(input_shape,
                                       default_size=224,
                                       min_size=32,
                                       data_format=backend.image_data_format(),
-                                      require_flatten=include_top,
+                                      require_flatten=False,
                                       weights=weights)
 
     if input_tensor is None:
@@ -350,7 +332,8 @@ def AtrousResNet50(include_top=True,
     x = identity_block(x, 3, [128, 128, 512], stage=3, block='b')
     x = identity_block(x, 3, [128, 128, 512], stage=3, block='c')
     x = identity_block(x, 3, [128, 128, 512], stage=3, block='d')
-
+    
+    # output_1 = x
     # conv_4
     x = conv_block_atrous(x, 3, [256, 256, 1024], stage=4, block='a', dilation_rate=(2, 2))
     x = identity_block_atrous(x, 3, [256, 256, 1024], stage=4, block='b', dilation_rate=(2, 2))
@@ -358,23 +341,24 @@ def AtrousResNet50(include_top=True,
     x = identity_block_atrous(x, 3, [256, 256, 1024], stage=4, block='d', dilation_rate=(2, 2))
     x = identity_block_atrous(x, 3, [256, 256, 1024], stage=4, block='e', dilation_rate=(2, 2))
     x = identity_block_atrous(x, 3, [256, 256, 1024], stage=4, block='f', dilation_rate=(2, 2))
-
+    
+    # output_2 = x
     # conv_5
     x = conv_block_atrous(x, 3, [512, 512, 2048], stage=5, block='a', dilation_rate=(4, 4))
     x = identity_block_atrous(x, 3, [512, 512, 2048], stage=5, block='b', dilation_rate=(4, 4))
     x = identity_block_atrous(x, 3, [512, 512, 2048], stage=5, block='c', dilation_rate=(4, 4))
 
-    if include_top:
-        x = GlobalAveragePooling2D(name='avg_pool')(x)
-        x = Dense(classes, activation='softmax', name='fc1000')(x)
-    else:
-        if pooling == 'avg':
-            x = GlobalAveragePooling2D()(x)
-        elif pooling == 'max':
-            x = GlobalMaxPool2D()(x)
-        else:
-            warnings.warn('The output shape of `ResNet50(include_top=False)` '
-                          'has been changed since Keras 2.2.0.')
+    # conv_6 (additional)
+    x = Conv2D(512, 3, padding='same', activation='relu')(x)
+
+
+    if pooling == 'avg':
+        x = GlobalAveragePooling2D()(x)
+    elif pooling == 'max':
+        x = GlobalMaxPool2D()(x)
+
+    # output_3 = x
+    # output = tf.concat([output_1, output_2, output_3], axis=bn_axis)
 
     # Ensure that the model takes into account
     # any potential predecessors of `input_tensor`.
@@ -387,19 +371,12 @@ def AtrousResNet50(include_top=True,
 
     # Load weights.
     if weights == 'imagenet':
-        if include_top:
-            weights_path = keras_utils.get_file(
-                'resnet50_weights_tf_dim_ordering_tf_kernels.h5',
-                WEIGHTS_PATH,
-                cache_subdir='models',
-                md5_hash='a7b3fe01876f51b976af0dea6bc144eb')
-        else:
-            weights_path = keras_utils.get_file(
-                'resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5',
-                WEIGHTS_PATH_NO_TOP,
-                cache_subdir='models',
-                md5_hash='a268eb855778b3df3c7506639542a6af')
-        model.load_weights(weights_path)
+        weights_path = keras_utils.get_file(
+            'resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5',
+            WEIGHTS_PATH_NO_TOP,
+            cache_subdir='models',
+            md5_hash='a268eb855778b3df3c7506639542a6af')
+        model.load_weights(weights_path, by_name=True)
         if backend.backend() == 'theano':
             keras_utils.convert_all_kernels_in_model(model)
     elif weights is not None:
@@ -409,6 +386,6 @@ def AtrousResNet50(include_top=True,
 
 if __name__ == "__main__":
     x_shape = (240, 320, 3)
-    base_model = AtrousResNet50(input_shape=x_shape, include_top=False, weights=None)
+    base_model = AtrousResNet50(input_shape=x_shape, weights=None)
     for idx, layer in enumerate(base_model.layers):
         print(str(idx) + '.', layer.name, str(layer.trainable))
