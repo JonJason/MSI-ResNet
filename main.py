@@ -121,7 +121,7 @@ def train_model(ds_name, paths, encoder):
     
     # if a checkpoint exists, restore the latest checkpoint.
     if ckpt_manager.latest_checkpoint:
-        ckpt.restore(ckpt_manager.latest_checkpoint)
+        ckpt.restore(ckpt_manager.latest_checkpoint).assert_consumed()
         val_loss.reset_states()
         start_epoch = int(ckpt_manager.latest_checkpoint.split('-')[-1])
         print ('Checkpoint restored:\n{}'.format(ckpt_manager.latest_checkpoint))
@@ -162,7 +162,7 @@ def train_model(ds_name, paths, encoder):
     min_val_loss = None
 
     for i, checkpoint in enumerate(ckpt_manager.checkpoints):
-        ckpt.restore(checkpoint)
+        ckpt.restore(checkpoint).assert_consumed()
         val_loss_result = val_loss.result()
         if min_val_loss is None or min_val_loss > val_loss_result:
             min_val_loss = val_loss_result
