@@ -7,8 +7,7 @@
 PARAMS = {
     "n_epochs": 10,
     "batch_size": 10,
-    "learning_rate": 1e-5,
-    "encoder": "atrous_resnet"
+    "learning_rate": 1e-5
 }
 
 """The predefined input image sizes for each of the 3 datasets.

@@ -250,6 +250,7 @@ def main():
 
     actions_list = ["train", "test", "summary"]
     datasets_list = ["salicon", "mit1003", "cat2000", "custom"]
+    encoders_list = ["atrous_resnet", "ml_atrous_vgg"]
 
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -266,6 +267,10 @@ def main():
                         help="specify the path where training data will be \
                               downloaded to or test data is stored")
 
+    parser.add_argument("-e", "--encoder", metavar="ENCODER",
+                        choices=encoders_list, default=encoders_list[0],
+                        help="specify the action (available: %s)" % " or ".join(encoders_list))
+
     parser.add_argument("-c", "--categorical", action="store_true",
                         help="specify wether the data is categorical or not")
 
@@ -273,7 +278,7 @@ def main():
 
     paths = define_paths(current_path, args)
 
-    encoder_name = config.PARAMS["encoder"]
+    encoder_name = args.encoder
 
     if args.action == "train":
         train_model(args.data, paths, encoder_name)
