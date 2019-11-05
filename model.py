@@ -2,6 +2,7 @@ import tensorflow as tf
 
 from atrous_resnet50 import AtrousResNet50
 from ml_atrous_vgg16 import MultievelAtrousVGG16
+from atrous_xception import AtrousXception
 from tensorflow.keras import Model, Input
 from tensorflow.keras.layers import Conv2D, UpSampling2D, InputLayer
 from tensorflow.keras import backend
@@ -29,6 +30,8 @@ class MyModel(Model):
         self._encoder_name = encoder
         if (encoder == "atrous_resnet"):
             self.encoder = AtrousResNet50(input_shape=self.input_layer.output_shape[0][1:], weights= encoder_weights)
+        elif (encoder == "atrous_xception"):
+            self.encoder = AtrousXception(input_shape=self.input_layer.output_shape[0][1:], weights= encoder_weights)
         elif (encoder == "ml_atrous_vgg"):
             self.encoder = MultievelAtrousVGG16(input_shape=self.input_layer.output_shape[0][1:], weights= encoder_weights)
         else:
@@ -140,6 +143,8 @@ class MyModel(Model):
         encoder_name = self._encoder_name
         if(encoder_name == "atrous_resnet"):
             n_of_trained_layers = 81
+        elif(encoder_name == "atrous_xception"):
+            n_of_trained_layers = 32
         elif(encoder_name == "ml_atrous_vgg"):
             n_of_trained_layers = 14
         

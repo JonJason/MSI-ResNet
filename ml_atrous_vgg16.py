@@ -204,5 +204,6 @@ def MultievelAtrousVGG16(weights='imagenet',
 if __name__ == "__main__":
     x_shape = (240, 320, 3)
     base_model = MultievelAtrousVGG16(input_shape=x_shape, weights=None)
-    for idx, layer in enumerate(base_model.layers):
-        print(str(idx) + '.', layer.name, str(layer.trainable))
+    # for idx, layer in enumerate(base_model.layers):
+    #     print(str(idx) + '.', layer.name, str(layer.trainable))
+    base_model.summary()

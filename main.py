@@ -250,7 +250,7 @@ def main():
 
     actions_list = ["train", "test", "summary"]
     datasets_list = ["salicon", "mit1003", "cat2000", "custom"]
-    encoders_list = ["atrous_resnet", "ml_atrous_vgg"]
+    encoders_list = ["atrous_resnet", "atrous_xception", "ml_atrous_vgg"]
 
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
