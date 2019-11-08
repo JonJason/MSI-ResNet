@@ -7,19 +7,20 @@ if backend.image_data_format() == 'channels_last':
 else:
     _ch_axis = 1
 
+@tf.function
 def kld(y_true, y_pred, eps=1e-7):
     y_true /= eps + tf.reduce_sum(y_true, axis=(1,2,3), keepdims=True)
     y_pred /= eps + tf.reduce_sum(y_pred, axis=(1,2,3), keepdims=True)
     loss = y_true * tf.math.log(eps + y_true / (eps + y_pred))
     return tf.reduce_mean(tf.reduce_sum(loss, axis=(1,2,3)))
 
+@tf.function
 def nss(y_fixs_true, y_pred):
     y_pred *= 255
     y_fixs_true *= 255
     y_pred = y_pred - tf.reduce_mean(y_pred, axis=(1, 2, 3), keepdims=True)
     y_pred = tf.map_fn(_normalize, y_pred)
     return tf.reduce_mean(y_pred * y_fixs_true)
-
 
 def cc(y_true, y_pred):
     y_true = tf.map_fn(_normalize, y_true - tf.reduce_mean(y_true, axis=(1,2,3), keepdims=True))
@@ -54,7 +55,7 @@ def auc_borji(y_fixs_true, y_pred, n_splits=100, step=0.1, eps=1e-7):
             fp = tf.reduce_sum(fp_over_occurrences, axis=1)/n_fixs
             tp = tf.concat([[0],tp,[1]], 0)
             fp = tf.concat([[0],fp,[1]], 0)
-
+            
             auc.append(tf.numpy_function(np.trapz, [tp,fp], tp.dtype))
         scores.append(tf.reduce_mean(auc))
 
@@ -63,5 +64,6 @@ def auc_borji(y_fixs_true, y_pred, n_splits=100, step=0.1, eps=1e-7):
 def kld_nss_cc(y_true, y_fixs_true, y_pred):
     return 10 * kld(y_true, y_pred) - 2 * cc(y_true, y_pred) - nss(y_fixs_true, y_pred)
 
+@tf.function
 def _normalize(x):
     return x / tf.math.reduce_std(x) if tf.reduce_max(x) > 0 else x

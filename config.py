@@ -8,8 +8,8 @@ PARAMS = {
     "n_epochs": 10,
     "batch_size": 10,
     "learning_rate": 1e-5,
-    "loss_fn": "kld",
-    "metrics": ["kld", "cc", "nss", "auc_borji"],
+    "loss_fn": "kld_nss_cc",
+    "metrics": ["kld_nss_cc", "cc", "nss"],
 }
 
 """The predefined input image sizes for each of the 3 datasets.
@@ -39,10 +39,11 @@ SPECS = {
     }
 }
 
-# loss function input format ("f" for fixs_map, "s" for sal_map)
+# loss function input format ("f" for fixs_map, "s" for sal_map, else for both)
 METRICS = {
     "kld": "s",
     "nss": "f",
     "cc": "s",
-    "auc_borji": "f"
+    "auc_borji": "f",
+    "kld_nss_cc": "_"
 }

@@ -21,8 +21,13 @@ loss_fn_in_format = config.METRICS[loss_fn_name]
 
 def _update_metrics(metrics, y_true, y_fixs_true, y_pred):
     for name, metric in metrics.items():
-        loss_in = y_fixs_true if config.METRICS[name] == "f" else y_true
-        metric(globals().get(name, None)(loss_in, y_pred))
+        if config.METRICS[name] == "f":
+            loss_args = (y_fixs_true, y_pred)
+        elif config.METRICS[name] == "s":
+            loss_args = (y_true, y_pred)
+        else:
+            loss_args = (y_true, y_fixs_true, y_pred)
+        metric(globals().get(name, None)(*loss_args))
 
 def _print_metrics(phase, res_metrics):
     res_printer = lambda x: "{}_{}: {}".format(phase, x[0], ('%.4f' if x[1].result() > 1e-3 else '%.4e') % x[1].result())
@@ -65,10 +70,14 @@ def define_paths(current_path, args):
 
 @tf.function
 def train_step(images, y_true, y_fixs_true, model, loss_fn, optimizer):
-    loss_in = y_fixs_true if loss_fn_in_format == "f" else y_true
     with tf.GradientTape() as tape:
         y_pred = model(images)
-        loss = loss_fn(loss_in, y_pred)
+        loss = tf.case([
+            (tf.strings.regex_full_match(loss_fn_in_format,"f"),
+                lambda: tf.numpy_function(loss_fn, [y_fixs_true, y_pred], y_pred.dtype)),
+            (tf.strings.regex_full_match(loss_fn_in_format,"s"),
+                lambda: tf.numpy_function(loss_fn, [y_true, y_pred], y_pred.dtype))],
+            default=lambda: tf.numpy_function(loss_fn, [y_true, y_fixs_true, y_pred], y_pred.dtype), exclusive=True)
     gradients = tape.gradient(loss, model.trainable_variables)
     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
     return y_pred, loss
@@ -76,7 +85,12 @@ def train_step(images, y_true, y_fixs_true, model, loss_fn, optimizer):
 @tf.function
 def val_step(images, y_true, y_fixs_true, model, loss_fn):
     y_pred = model(images)
-    loss = loss_fn(y_true, y_pred)
+    loss = tf.case([
+        (tf.strings.regex_full_match(loss_fn_in_format,"f"),
+            lambda: tf.numpy_function(loss_fn, [y_fixs_true, y_pred], y_pred.dtype)),
+        (tf.strings.regex_full_match(loss_fn_in_format,"s"),
+            lambda: tf.numpy_function(loss_fn, [y_true, y_pred], y_pred.dtype))],
+        default=lambda: tf.numpy_function(loss_fn, [y_true, y_fixs_true, y_pred], y_pred.dtype), exclusive=True)
     return y_pred, loss
 
 @tf.function
@@ -145,11 +159,12 @@ def train_model(ds_name, encoder, paths):
         start_epoch = int(ckpt_manager.latest_checkpoint.split('-')[-1])
         print ('Checkpoint restored:\n{}'.format(ckpt_manager.latest_checkpoint))
 
-    print(">> Start training model on %s..." % ds_name.upper())
+    print("\n>> Start training model on %s..." % ds_name.upper())
     print(("Training details:" +
     "\n{0:<4}Number of epochs: {n_epochs:d}" +
     "\n{0:<4}Batch size: {batch_size:d}" +
     "\n{0:<4}Learning rate: {learning_rate:.1e}").format(" ", **config.PARAMS))
+    print("_" * 65)
     if ds_name == "salicon" and start_epoch < 2:
         model.freeze_unfreeze_encoder_trained_layers(True)
     for epoch in range(start_epoch, n_epochs):
