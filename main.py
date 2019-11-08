@@ -17,17 +17,10 @@ from model import MyModel
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 logging.getLogger("tensorflow").setLevel(logging.ERROR)
 loss_fn_name = config.PARAMS["loss_fn"]
-loss_fn_in_format = config.METRICS[loss_fn_name]
 
 def _update_metrics(metrics, y_true, y_fixs_true, y_pred):
     for name, metric in metrics.items():
-        if config.METRICS[name] == "f":
-            loss_args = (y_fixs_true, y_pred)
-        elif config.METRICS[name] == "s":
-            loss_args = (y_true, y_pred)
-        else:
-            loss_args = (y_true, y_fixs_true, y_pred)
-        metric(globals().get(name, None)(*loss_args))
+        metric(globals().get(name, None)(y_true, y_fixs_true, y_pred))
 
 def _print_metrics(phase, res_metrics):
     res_printer = lambda x: "{}_{}: {}".format(phase, x[0], ('%.4f' if x[1].result() > 1e-3 else '%.4e') % x[1].result())
@@ -72,12 +65,7 @@ def define_paths(current_path, args):
 def train_step(images, y_true, y_fixs_true, model, loss_fn, optimizer):
     with tf.GradientTape() as tape:
         y_pred = model(images)
-        loss = tf.case([
-            (tf.strings.regex_full_match(loss_fn_in_format,"f"),
-                lambda: tf.numpy_function(loss_fn, [y_fixs_true, y_pred], y_pred.dtype)),
-            (tf.strings.regex_full_match(loss_fn_in_format,"s"),
-                lambda: tf.numpy_function(loss_fn, [y_true, y_pred], y_pred.dtype))],
-            default=lambda: tf.numpy_function(loss_fn, [y_true, y_fixs_true, y_pred], y_pred.dtype), exclusive=True)
+        loss = loss_fn(y_true, y_fixs_true, y_pred)
     gradients = tape.gradient(loss, model.trainable_variables)
     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
     return y_pred, loss
@@ -85,12 +73,7 @@ def train_step(images, y_true, y_fixs_true, model, loss_fn, optimizer):
 @tf.function
 def val_step(images, y_true, y_fixs_true, model, loss_fn):
     y_pred = model(images)
-    loss = tf.case([
-        (tf.strings.regex_full_match(loss_fn_in_format,"f"),
-            lambda: tf.numpy_function(loss_fn, [y_fixs_true, y_pred], y_pred.dtype)),
-        (tf.strings.regex_full_match(loss_fn_in_format,"s"),
-            lambda: tf.numpy_function(loss_fn, [y_true, y_pred], y_pred.dtype))],
-        default=lambda: tf.numpy_function(loss_fn, [y_true, y_fixs_true, y_pred], y_pred.dtype), exclusive=True)
+    loss = loss_fn(y_true, y_fixs_true, y_pred)
     return y_pred, loss
 
 @tf.function
@@ -123,7 +106,7 @@ def train_model(ds_name, encoder, paths):
             model.load_weights(salicon_weights)
             print("Salicon weights are loaded!")
         else:
-            download.download_pretrained_weights(paths["weights"], encoder, "salicon")
+            download.download_pretrained_weights(paths["weights"], encoder, "salicon", loss_fn_name)
         del salicon_weights
 
     model.summary()
@@ -163,7 +146,9 @@ def train_model(ds_name, encoder, paths):
     print(("Training details:" +
     "\n{0:<4}Number of epochs: {n_epochs:d}" +
     "\n{0:<4}Batch size: {batch_size:d}" +
-    "\n{0:<4}Learning rate: {learning_rate:.1e}").format(" ", **config.PARAMS))
+    "\n{0:<4}Learning rate: {learning_rate:.1e}" +
+    "\n{0:<4}Loss function: {1}" +
+    "\n{0:<4}Metrics: {2}").format(" ", loss_fn_name, ", ".join(metrics), **config.PARAMS))
     print("_" * 65)
     if ds_name == "salicon" and start_epoch < 2:
         model.freeze_unfreeze_encoder_trained_layers(True)
@@ -240,12 +225,12 @@ def test_model(ds_name, encoder, paths, categorical=False):
 
     model = MyModel(encoder, ds_name, "test")
 
-    weights_path = paths["weights"] + w_filename_template % (encoder, ds_name)
+    weights_path = paths["weights"] + w_filename_template % (encoder, ds_name, loss_fn_name)
     if os.path.exists(weights_path):
         model.load_weights(weights_path)
         print("Salicon weights are loaded!")
     else:
-        download.download_pretrained_weights(paths["weights"], encoder, ds_name)
+        download.download_pretrained_weights(paths["weights"], encoder, ds_name, loss_fn_name)
     
     del weights_path
 

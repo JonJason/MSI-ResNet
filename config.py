@@ -38,12 +38,3 @@ SPECS = {
         "n_category": 20
     }
 }
-
-# loss function input format ("f" for fixs_map, "s" for sal_map, else for both)
-METRICS = {
-    "kld": "s",
-    "nss": "f",
-    "cc": "s",
-    "auc_borji": "f",
-    "kld_nss_cc": "_"
-}

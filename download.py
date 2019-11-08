@@ -166,7 +166,7 @@ def download_dataset(ds_name, parent_path):
                         '\tpython main.py -h')
 
 # TODO: update to your model
-def download_pretrained_weights(dest_path, encoder, ds_name):
+def download_pretrained_weights(dest_path, encoder, ds_name, loss_fn_name):
     """Downloads the pre-trained weights for the VGG16 model when
        training or the MSI-Net when testing on new data instances.
 
@@ -180,17 +180,19 @@ def download_pretrained_weights(dest_path, encoder, ds_name):
                  on the solution provided at [https://bit.ly/2JSVgMQ].
     """
 
-    print(">> Downloading pre-trained weights with encoder %s on %s..." % (encoder, ds_name), end="", flush=True)
+    print(">> Downloading pre-trained weights with encoder %s on %s by loss function %s..." % (encoder, ds_name, loss_fn_name), end="", flush=True)
 
     os.makedirs(dest_path, exist_ok=True)
 
     ids = {
         "atrous_resnet": {
-            "salicon": "1u5lQXjS9JY5vLFnzItpw6mOlbAWx5p2p"
+            "salicon": {
+                "auc_borji":"1u5lQXjS9JY5vLFnzItpw6mOlbAWx5p2p"
+            }
         }
     }
 
-    url = "https://drive.google.com/uc?id=" + ids[encoder][ds_name] + "&export=download"
+    url = "https://drive.google.com/uc?id=" + ids[encoder][ds_name][loss_fn_name] + "&export=download"
 
     session = requests.Session()
 

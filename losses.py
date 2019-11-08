@@ -7,36 +7,38 @@ if backend.image_data_format() == 'channels_last':
 else:
     _ch_axis = 1
 
-@tf.function
-def kld(y_true, y_pred, eps=1e-7):
+def kld(y_true, y_fixs_true, y_pred, eps=1e-7):
     y_true /= eps + tf.reduce_sum(y_true, axis=(1,2,3), keepdims=True)
     y_pred /= eps + tf.reduce_sum(y_pred, axis=(1,2,3), keepdims=True)
     loss = y_true * tf.math.log(eps + y_true / (eps + y_pred))
     return tf.reduce_mean(tf.reduce_sum(loss, axis=(1,2,3)))
 
-@tf.function
-def nss(y_fixs_true, y_pred):
+def nss(y_true, y_fixs_true, y_pred):
     y_pred *= 255
     y_fixs_true *= 255
-    y_pred = y_pred - tf.reduce_mean(y_pred, axis=(1, 2, 3), keepdims=True)
-    y_pred = tf.map_fn(_normalize, y_pred)
+    y_pred = _normalize(y_pred)
     return tf.reduce_mean(y_pred * y_fixs_true)
 
-def cc(y_true, y_pred):
-    y_true = tf.map_fn(_normalize, y_true - tf.reduce_mean(y_true, axis=(1,2,3), keepdims=True))
-    y_pred = tf.map_fn(_normalize, y_pred - tf.reduce_mean(y_pred, axis=(1,2,3), keepdims=True))
-    stacked = tf.reshape(tf.stack([y_true, y_pred], axis=1), [y_true.shape[0], 2,-1]).numpy()
-    return tf.reduce_mean(tf.map_fn(lambda y_i: np.corrcoef(y_i[1], y_i[0])[0][1], stacked))
+def cc(y_true, y_fixs_true, y_pred):
+    y_true = _normalize(y_true)
+    y_pred = _normalize(y_pred)
+    stacked = tf.reshape(tf.stack([y_true, y_pred], axis=1), [y_true.shape[0], 2,-1])
+    scores = tf.zeros([stacked.shape[0]],dtype=stacked.dtype)
+    for i in range(y_pred.shape[0]):
+        score = tf.numpy_function(lambda x,y:
+            np.corrcoef(x,y)[0][1].astype("float32"), [stacked[i][1], stacked[i][0]], stacked.dtype)
+        scores = tf.tensor_scatter_nd_update(scores, [[i]], [score])
+    return tf.reduce_mean(scores)
 
-def auc_borji(y_fixs_true, y_pred, n_splits=100, step=0.1, eps=1e-7):
+def auc_borji(y_true, y_fixs_true, y_pred, n_splits=100, step=0.1, eps=1e-7):
 
     # reduce channel shape
     new_shape = tf.gather_nd(tf.shape(y_pred), tf.where(tf.range(4)!=_ch_axis))
     y_pred = tf.reshape(y_pred, new_shape)
     y_fixs_true = tf.reshape(y_fixs_true, new_shape)
 
-    scores = []
-    for i in range(tf.shape(y_pred)[0]):
+    scores = tf.zeros([y_pred.shape[0]],dtype=y_pred.dtype)
+    for i in range(y_pred.shape[0]):
         s = tf.reshape(y_pred[i], [-1])
         f = tf.reshape(y_fixs_true[i], [-1])
         s_th = tf.gather_nd(s, tf.where(f > 0))
@@ -45,9 +47,10 @@ def auc_borji(y_fixs_true, y_pred, n_splits=100, step=0.1, eps=1e-7):
 
         # for each fixation, sample Nsplits values from anywhere on the sal map
         r = tf.random.uniform([n_splits, n_fixs], maxval=n_pxs-1, dtype=tf.int32)
-        auc = []
-        for idxs in r:
-            curfix = tf.gather(s,idxs)
+        
+        auc = tf.zeros([r.shape[0]],dtype=r.dtype)
+        for j in range(r.shape[0]):
+            curfix = tf.gather(s, tf.gather(r, j))
             threshes = tf.reverse(tf.range(0, tf.reduce_max(tf.maximum(s_th,curfix))+step, delta=step), [0])
             tp_over_occurrences = tf.cast(tf.reshape(s_th, [1, -1]) >= tf.reshape(threshes, [-1,1]), tf.int32)
             tp = tf.reduce_sum(tp_over_occurrences, axis=1)/n_fixs
@@ -56,14 +59,24 @@ def auc_borji(y_fixs_true, y_pred, n_splits=100, step=0.1, eps=1e-7):
             tp = tf.concat([[0],tp,[1]], 0)
             fp = tf.concat([[0],fp,[1]], 0)
             
-            auc.append(tf.numpy_function(np.trapz, [tp,fp], tp.dtype))
-        scores.append(tf.reduce_mean(auc))
+            auc = tf.tensor_scatter_nd_update(auc, [[j]], [tf.numpy_function(np.trapz, [tp,fp], tp.dtype)])
+        scores = tf.tensor_scatter_nd_update(scores, [[i]], [tf.reduce_mean(auc)])
 
-    return tf.reduce_mean(scores)
+    return 1 - tf.reduce_mean(scores)
 
 def kld_nss_cc(y_true, y_fixs_true, y_pred):
-    return 10 * kld(y_true, y_pred) - 2 * cc(y_true, y_pred) - nss(y_fixs_true, y_pred)
+    kld_score = kld(y_true, y_fixs_true, y_pred)
+    cc_score = cc(y_true, y_fixs_true, y_pred)
+    nss_score = nss(y_true, y_fixs_true, y_pred)
+    return 10 * kld_score - 2 * cc_score - nss_score
 
-@tf.function
 def _normalize(x):
-    return x / tf.math.reduce_std(x) if tf.reduce_max(x) > 0 else x
+    x = x - tf.reduce_mean(x, axis=(1, 2, 3), keepdims=True)
+    return _update_nd(x, tf.reduce_max(x, axis=(1, 2, 3)) > 0,
+        lambda _x: _x/tf.math.reduce_std(_x, axis=(1,2,3), keepdims=True))
+
+def _update_nd(x, whereabouts, updater):
+    pos = tf.where(whereabouts)
+    _x = tf.gather_nd(x, pos)
+    new_x = updater(_x)
+    return tf.tensor_scatter_nd_update(x, pos, new_x)
