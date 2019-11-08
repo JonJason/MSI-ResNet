@@ -1,9 +1,10 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import argparse
 import os
-import logging
 
-import pprint
+import logging
+import download
+from losses import kld, nss, cc, auc_borji, kld_nss_cc
 
 import tensorflow as tf
 from tensorflow.keras import backend
@@ -15,6 +16,17 @@ from model import MyModel
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 logging.getLogger("tensorflow").setLevel(logging.ERROR)
+loss_fn_name = config.PARAMS["loss_fn"]
+loss_fn_in_format = config.METRICS[loss_fn_name]
+
+def _update_metrics(metrics, y_true, y_fixs_true, y_pred):
+    for name, metric in metrics.items():
+        loss_in = y_fixs_true if config.METRICS[name] == "f" else y_true
+        metric(globals().get(name, None)(loss_in, y_pred))
+
+def _print_metrics(phase, res_metrics):
+    res_printer = lambda x: "{}_{}: {}".format(phase, x[0], ('%.4f' if x[1].result() > 1e-3 else '%.4e') % x[1].result())
+    return " - ".join(list(map(res_printer, res_metrics.items())))
 
 def define_paths(current_path, args):
     """A helper function to define all relevant path elements for the
@@ -52,28 +64,26 @@ def define_paths(current_path, args):
     return paths
 
 @tf.function
-def train_step(images, y_true, model, loss_fn, train_loss, optimizer):
+def train_step(images, y_true, y_fixs_true, model, loss_fn, optimizer):
+    loss_in = y_fixs_true if loss_fn_in_format == "f" else y_true
     with tf.GradientTape() as tape:
         y_pred = model(images)
-        loss = loss_fn(y_true, y_pred)
+        loss = loss_fn(loss_in, y_pred)
     gradients = tape.gradient(loss, model.trainable_variables)
     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-
-    train_loss(loss)
-    return y_pred
+    return y_pred, loss
 
 @tf.function
-def val_step(images, y_true, model, loss_fn, val_loss):
+def val_step(images, y_true, y_fixs_true, model, loss_fn):
     y_pred = model(images)
-    t_loss = loss_fn(y_true, y_pred)
-
-    val_loss(t_loss)
+    loss = loss_fn(y_true, y_pred)
+    return y_pred, loss
 
 @tf.function
 def test_step(images, model):
     return model(images)
 
-def train_model(ds_name, paths, encoder):
+def train_model(ds_name, encoder, paths):
     """The main function for executing network training. It loads the specified
        dataset iterator, saliency model, and helper classes. Training is then
        performed in a new session by iterating over all batches for a number of
@@ -85,7 +95,7 @@ def train_model(ds_name, paths, encoder):
         paths (dict, str): A dictionary with all path elements.
     """
 
-    w_filename_template = "/%s_%s_weights.h5" # [encoder]_[ds_name]_weights.h5
+    w_filename_template = "/%s_%s_%s_weights.h5" # [encoder]_[ds_name]_[loss_fn_name]_weights.h5
 
     (train_ds, n_train), (val_ds, n_val) = data.load_train_dataset(ds_name, paths["data"])
     
@@ -94,68 +104,80 @@ def train_model(ds_name, paths, encoder):
     model = MyModel(encoder, ds_name, "train")
 
     if ds_name != "salicon":
-        salicon_weights = paths["weights"] + w_filename_template % (encoder, "salicon")
+        salicon_weights = paths["weights"] + w_filename_template % (encoder, "salicon", loss_fn_name)
         if os.path.exists(salicon_weights):
             model.load_weights(salicon_weights)
             print("Salicon weights are loaded!")
         else:
-            raise FileNotFoundError("Please train model on SALICON database first")
+            download.download_pretrained_weights(paths["weights"], encoder, "salicon")
         del salicon_weights
 
     model.summary()
 
     n_epochs = config.PARAMS["n_epochs"]
 
-    # Preparing 
-    loss_fn = kl_divergence
+    # Preparing
+    loss_fn = globals().get(loss_fn_name, None)
     optimizer = tf.keras.optimizers.Adam(config.PARAMS["learning_rate"])
 
-    train_loss = tf.keras.metrics.Mean(name="train_loss")
-    val_loss = tf.keras.metrics.Mean(name="val_loss")
+    metrics = config.PARAMS["metrics"]
+    train_metrics = {}
+    val_metrics = {}
+    for name in metrics:
+        train_metrics[name] = tf.keras.metrics.Mean(name="train_%s"%name)
+        val_metrics[name] = tf.keras.metrics.Mean(name="val_%s"%name)
+
+    met_to_ckpt_kwargs = lambda phase, met: list(map(lambda x: ("%s_%s"%(phase,x[0]), x[1]), met.items()))
+    metrics_as_ckpt_kwargs = dict(met_to_ckpt_kwargs("train", train_metrics) + met_to_ckpt_kwargs("val", val_metrics))
 
     ckpts_path = paths["ckpts"] + "%s/%s/" % (encoder, ds_name)
-    ckpt = tf.train.Checkpoint(net=model, val_loss=val_loss)
+    ckpt = tf.train.Checkpoint(net=model, **metrics_as_ckpt_kwargs)
     ckpt_manager = tf.train.CheckpointManager(ckpt, ckpts_path, max_to_keep=n_epochs,
-                                                checkpoint_name="model__val_loss__optimizer__ckpt")
+                                                checkpoint_name="%s_ckpt"%loss_fn_name)
     start_epoch = 0
     
     # if a checkpoint exists, restore the latest checkpoint.
     if ckpt_manager.latest_checkpoint:
         ckpt.restore(ckpt_manager.latest_checkpoint).assert_consumed()
-        val_loss.reset_states()
+        for name in metrics:
+            train_metrics[name].reset_states()
+            val_metrics[name].reset_states()
         start_epoch = int(ckpt_manager.latest_checkpoint.split('-')[-1])
         print ('Checkpoint restored:\n{}'.format(ckpt_manager.latest_checkpoint))
 
     print(">> Start training model on %s..." % ds_name.upper())
+    print(("Training details:" +
+    "\n{0:<4}Number of epochs: {n_epochs:d}" +
+    "\n{0:<4}Batch size: {batch_size:d}" +
+    "\n{0:<4}Learning rate: {learning_rate:.1e}").format(" ", **config.PARAMS))
     if ds_name == "salicon" and start_epoch < 2:
         model.freeze_unfreeze_encoder_trained_layers(True)
     for epoch in range(start_epoch, n_epochs):
         if ds_name == "salicon" and epoch == 2:
             model.freeze_unfreeze_encoder_trained_layers(False)
 
-        train_progbar = Progbar(n_train, stateful_metrics=["loss"])
-        for train_images, train_y_true, train_ori_sizes, train_filenames in train_ds:
-            y_pred = train_step(train_images, train_y_true, model, loss_fn, train_loss, optimizer)
-            train_progbar.add(train_images.shape[0], [("loss", train_loss.result())])
+        train_progbar = Progbar(n_train, stateful_metrics=metrics)
+        for train_x, train_fixs, train_y_true, train_ori_sizes, train_filenames in train_ds:
+            train_y_pred, train_loss = train_step(train_x, train_y_true, train_fixs, model, loss_fn, optimizer)
+            _update_metrics(train_metrics, train_y_true, train_fixs, train_y_pred)
+            train_progbar.add(train_x.shape[0], list(map(lambda x: (x[0],x[1].result()), train_metrics.items())))
 
-        val_progbar = Progbar(n_val, stateful_metrics=["val_loss"])
-        for val_images, val_y_true, val_ori_sizes, val_filenames in val_ds:
-            val_step(val_images, val_y_true, model, loss_fn, val_loss)
-            val_progbar.add(val_images.shape[0], [("val_loss", val_loss.result())])
+        val_progbar = Progbar(n_val, stateful_metrics=metrics)
+        for val_x, val_fixs, val_y_true, val_ori_sizes, val_filenames in val_ds:
+            val_y_pred, val_loss = val_step(val_x, val_y_true, val_fixs, model, loss_fn)
+            _update_metrics(val_metrics, val_y_true, val_fixs, val_y_pred)
+            val_progbar.add(val_x.shape[0], list(map(lambda x: (x[0],x[1].result()), val_metrics.items())))
 
-        train_loss_result = train_loss.result()
-        val_loss_result = val_loss.result()
-        template = 'Epoch {} - Loss: {} - Val Loss: {}'
-        print(template.format(epoch+1,
-            ('%.4f' if train_loss_result > 1e-3 else '%.4e') % train_loss_result,
-            ('%.4f' if val_loss_result > 1e-3 else '%.4e') % val_loss_result
-        ))
+        train_metrics_results = _print_metrics("t",train_metrics)
+        val_metrics_results = _print_metrics("v",val_metrics)
+        print('Epoch {} - {} - {}'.format(epoch+1, train_metrics_results, val_metrics_results))
         
         ckpt_manager.save()
 
         # Reset the metrics for the next epoch
-        train_loss.reset_states()
-        val_loss.reset_states()
+        for name in metrics:
+            train_metrics[name].reset_states()
+            val_metrics[name].reset_states()
 
     # Picking best result
     print(">> Picking best result")
@@ -163,22 +185,28 @@ def train_model(ds_name, paths, encoder):
 
     for i, checkpoint in enumerate(ckpt_manager.checkpoints):
         ckpt.restore(checkpoint).assert_consumed()
-        val_loss_result = val_loss.result()
+
+        train_metrics_results = _print_metrics("t",train_metrics)
+        val_metrics_results = _print_metrics("v",val_metrics)
+        print('Epoch {} - {} - {}'.format(i+1, train_metrics_results, val_metrics_results))
+        val_loss_result = val_metrics[loss_fn_name].result()
         if min_val_loss is None or min_val_loss > val_loss_result:
+            min_train_loss = train_metrics[loss_fn_name].result()
             min_val_loss = val_loss_result
             min_index = i
-
+    
     ckpt.restore(ckpt_manager.checkpoints[min_index])
-    print("best result picked -> epoch: %d - val_loss: %s" % (min_index + 1,
+    print("best result picked -> epoch: {0} - train_{1}: {2} - val_{1}: {3}".format(min_index + 1, loss_fn_name,
+        ('%.4f' if min_train_loss > 1e-3 else '%.4e') % min_train_loss,
         ('%.4f' if min_val_loss > 1e-3 else '%.4e') % min_val_loss))
 
     # Saving model's weights
     print(">> Saving model's weights")
-    dest_path = paths["weights"] + w_filename_template % (encoder, ds_name)
+    dest_path = paths["weights"] + w_filename_template % (encoder, ds_name, loss_fn_name)
     model.save_weights(dest_path)
     print("weights are saved to:\n%s" % dest_path)
 
-def test_model(ds_name, paths, encoder, categorical=False):
+def test_model(ds_name, encoder, paths, categorical=False):
     """The main function for executing network testing. It loads the specified
        dataset iterator and optimized saliency model. By default, when no model
        checkpoint is found locally, the pretrained weights will be downloaded.
@@ -202,42 +230,24 @@ def test_model(ds_name, paths, encoder, categorical=False):
         model.load_weights(weights_path)
         print("Salicon weights are loaded!")
     else:
-        raise FileNotFoundError("Please train model on %s database first" % ds_name.upper())
+        download.download_pretrained_weights(paths["weights"], encoder, ds_name)
+    
     del weights_path
 
-
-
     print(">> Start predicting using model trained on %s..." % ds_name.upper())
-    y_pred = None
-    filenames = None
-    ori_sizes = None
+    results_path = paths["results"] + "%s/%s/" % (ds_name, encoder)
+
     # Preparing progbar
     test_progbar = Progbar(n_test)
     for test_images, test_ori_sizes, test_filenames in test_ds:
         pred = test_step(test_images, model)
-        if y_pred is None:
-            y_pred = pred
-            filenames = test_filenames
-            ori_sizes = test_ori_sizes
-        else:
-            y_pred = tf.concat([y_pred, pred], axis=0)
-            filenames = tf.concat([filenames, test_filenames], axis=0)
-            ori_sizes = tf.concat([ori_sizes, test_ori_sizes], axis=0)
+        for pred, filename, ori_size in zip(pred, test_filenames.numpy(), test_ori_sizes):
+            img = data.postprocess_saliency_map(pred, ori_size)
+            tf.io.write_file(results_path + filename.decode("utf-8"), img)
         test_progbar.add(test_images.shape[0])
-    print("Saving Images")
-    results_path = paths["results"]
-    for pred, filename, ori_size in zip(y_pred, filenames.numpy(), ori_sizes):
-        img = data.postprocess_saliency_map(pred, ori_size)
-        tf.io.write_file(results_path + filename.decode("utf-8"), img)
 
-def kl_divergence(y_true, y_pred, eps=1e-7):
-    sum_per_image = tf.reduce_sum(y_true, axis=(1, 2, 3), keepdims=True)
-    y_true /= eps + sum_per_image
-
-    sum_per_image = tf.reduce_sum(y_pred, axis=(1, 2, 3), keepdims=True)
-    y_pred /= eps + sum_per_image
-    loss = y_true * tf.math.log(eps + y_true / (eps + y_pred))
-    return tf.reduce_mean(tf.reduce_sum(loss, axis=(1, 2, 3)))
+def eval_results(ds_name, encoder, paths, categorical=False):
+    pass
 
 def main():
     """The main function reads the command line arguments, invokes the
@@ -248,46 +258,73 @@ def main():
     current_path = os.path.dirname(os.path.realpath(__file__))
     default_data_path = current_path + "/data"
 
-    actions_list = ["train", "test", "summary"]
     datasets_list = ["salicon", "mit1003", "cat2000", "custom"]
     encoders_list = ["atrous_resnet", "atrous_xception", "ml_atrous_vgg"]
+    commands_dict = {"train":{"help": "train the model",
+                              "args": ["encoder", "data", "path"]},
+                     "test":{"help": "predict saliency maps using the model",
+                             "args": ["encoder", "data", "path", "categorical"]},
+                     "summary":{"help": "show summary of the model", 
+                                "args": ["encoder", "data", "deep"]},
+                     "eval":{"help": "eval predict saliency maps predicted by the model",
+                             "args": ["encoder", "data", "path", "categorical"]}}
 
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument("action", metavar="ACTION", choices=actions_list,
-                        help="specify the action (allowed: %s)" % " or ".join(actions_list))
+    args_opts = {
+        "data": {
+            "args": ("-d", "--data"),
+            "kwargs": {
+                "metavar": "DATA", "choices": datasets_list, "default": datasets_list[0],
+                "help": "define which dataset will be used for training or which trained model is used for testing"}},
+        "encoder": {
+            "args": ("-e", "--encoder"),
+            "kwargs": {
+                "metavar": "ENCODER", "choices": encoders_list, "default": encoders_list[0],
+                "help": "specify the action (available: %s)" % " or ".join(encoders_list)}},
+        "path": {
+            "args": ("-p", "--path"),
+            "kwargs": {
+                "metavar": "DATA_PATH", "default": default_data_path,
+                "help":"specify the path where training data will be downloaded to or test data is stored"}},
+        "categorical": {
+            "args": ("-c", "--categorical"),
+            "kwargs": {
+                "action":"store_true",
+                "help":"specify wether the test data is categorical or not."}},
+        "deep": {
+            "args": ("-D", "--deep"),
+            "kwargs": {
+                "action":"store_true",
+                "help":"specify wether the summary of nested model would like to be shown as well."}}}
 
-    parser.add_argument("-d", "--data", metavar="DATA",
-                        choices=datasets_list, default=datasets_list[0],
-                        help="define which dataset will be used for training \
-                              or which trained model is used for testing")
-
-    parser.add_argument("-p", "--path", metavar="DATA_PATH", default=default_data_path,
-                        help="specify the path where training data will be \
-                              downloaded to or test data is stored")
-
-    parser.add_argument("-e", "--encoder", metavar="ENCODER",
-                        choices=encoders_list, default=encoders_list[0],
-                        help="specify the action (available: %s)" % " or ".join(encoders_list))
-
-    parser.add_argument("-c", "--categorical", action="store_true",
-                        help="specify wether the data is categorical or not")
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    
+    subparsers = parser.add_subparsers( dest="action", metavar="ACTION",
+                                        required=True, parser_class=argparse.ArgumentParser)
+    
+    for cmd, cmd_opt in commands_dict.items():
+        sub_command_parser = subparsers.add_parser(cmd, help=cmd_opt["help"])
+        for cmd_arg in cmd_opt["args"]:
+            sub_command_parser.add_argument(*args_opts[cmd_arg]["args"], **args_opts[cmd_arg]["kwargs"])
 
     args = parser.parse_args()
-
-    paths = define_paths(current_path, args)
-
     encoder_name = args.encoder
+    action = args.action
 
-    if args.action == "train":
-        train_model(args.data, paths, encoder_name)
-    elif args.action == "test":
-        test_model(args.data, paths, encoder_name, args.categorical)
-    elif args.action == "summary":
-        
+    if action == "train":
+        train_model(args.data, encoder_name, define_paths(current_path, args))
+    elif action == "test":
+        test_model(args.data, encoder_name, define_paths(current_path, args), args.categorical)
+    elif action == "summary":
         model = MyModel(encoder_name, args.data, "test")
         model.summary()
+        if args.deep:
+            for layer in model.layers:
+                if type(layer).__name__ == "Model":
+                    layer.summary()
+
+    elif action == "eval":
+        eval_results(args.data, encoder_name, define_paths(current_path, args), args.categorical)
 
 
 if __name__ == "__main__":

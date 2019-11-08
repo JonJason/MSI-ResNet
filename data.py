@@ -8,14 +8,14 @@ import tensorflow as tf
 
 import config
 import download
+import scipy.io
 
 from tensorflow.keras import backend
 
 # TODO: fix comments for all functions
 def load_train_dataset(ds_name, data_path):
     spec = config.SPECS[ds_name]
-    target_size = spec["img_size"]
-    sal_map_suffix = spec.get("sal_map_suffix", "")
+    input_size = spec["input_size"]
     category_depth = 1 if spec.get("categorical", False) else 0
 
     n_train = spec["n_train"]
@@ -25,11 +25,13 @@ def load_train_dataset(ds_name, data_path):
 
     train_imgs_dir = data_path + "stimuli"
     train_maps_dir = data_path + "maps"
+    train_fixs_dir = data_path + "fixations"
 
     if has_val:
         n_val = spec["n_val"]
         train_imgs_dir += "/train"
         train_maps_dir += "/train"
+        train_fixs_dir += "/train"
     else:
         n_val = math.floor(n_train * spec["val_portion"])
 
@@ -42,17 +44,21 @@ def load_train_dataset(ds_name, data_path):
     
     # loading dataset
     train_x = _get_file_list(train_imgs_dir, category_depth)
-    train_y = _get_file_list(train_maps_dir, category_depth, suffix=sal_map_suffix)
-    _check_consistency(zip(train_x, train_y), n_train, suffix=sal_map_suffix)
-    train_ds = tf.data.Dataset.from_tensor_slices((train_x, train_y))
+    train_fixs = _get_file_list(train_fixs_dir, category_depth)
+    train_y = _get_file_list(train_maps_dir, category_depth)
+    _check_consistency(zip(train_x, train_fixs, train_y), n_train)
+    train_ds = tf.data.Dataset.from_tensor_slices((train_x, train_fixs, train_y))
 
+    # if has a separate validation set: load them
+    # else: take a certain portion from train dataset 
     if has_val:
         train_ds = train_ds.shuffle(n_train, reshuffle_each_iteration=False)
-        valid_list_x = _get_file_list(data_path + "stimuli/val", category_depth)
-        valid_list_y = _get_file_list(data_path + "maps/val", category_depth, suffix=sal_map_suffix)
-        _check_consistency(zip(valid_list_x, valid_list_y), n_val, suffix=sal_map_suffix)
+        val_x = _get_file_list(data_path + "stimuli/val", category_depth)
+        val_fixs = _get_file_list(data_path + "fixations/val", category_depth)
+        val_y = _get_file_list(data_path + "maps/val", category_depth)
+        _check_consistency(zip(val_x, val_fixs, val_y), n_val)
 
-        val_ds = tf.data.Dataset.from_tensor_slices((valid_list_x, valid_list_y))
+        val_ds = tf.data.Dataset.from_tensor_slices((val_x, val_fixs, val_y))
         val_ds = val_ds.shuffle(n_val, reshuffle_each_iteration=False)
     else:
         if category_depth > 0:
@@ -77,21 +83,21 @@ def load_train_dataset(ds_name, data_path):
 
         n_train -= n_val
 
-    train_ds = _prepare_image_ds(train_ds, target_size, category_depth)
-    val_ds = _prepare_image_ds(val_ds, target_size, category_depth)
+    train_ds = _prepare_image_ds(train_ds, input_size, category_depth)
+    val_ds = _prepare_image_ds(val_ds, input_size, category_depth)
 
     return ((train_ds, n_train), (val_ds, n_val))
 
 def load_test_dataset(ds_name, data_path, categorical=False):
     
     spec = config.SPECS[ds_name]
-    target_size = spec["img_size"]
+    input_size = spec["input_size"]
     category_depth = 1 if categorical else 0
 
     test_x = _get_file_list(data_path, category_depth)
     n_test = len(test_x) 
     test_ds = tf.data.Dataset.from_tensor_slices(test_x)
-    test_ds = _prepare_image_ds(test_ds, target_size, category_depth)
+    test_ds = _prepare_image_ds(test_ds, input_size, category_depth)
 
     return (test_ds, n_test)
 
@@ -121,13 +127,13 @@ def postprocess_saliency_map(saliency_map, target_size):
 
     return saliency_map_jpeg
 
-def _prepare_image_ds(ds, target_size, category_depth, one_at_a_time=False):
+def _prepare_image_ds(ds, input_size, category_depth, one_at_a_time=False):
     """Here the list of file directories is shuffled (only when training),
        loaded, batched, and prefetched to ensure high GPU utilization.
 
     Args:
-        files (list, str): A list that holds the paths to all file instances.
-        target_size (tuple, int): A tuple that specifies the size to which
+        ds (tf.data.Dataset): dataset holding list of tuple of the paths to all file instances.
+        input_size (tuple, int): A tuple that specifies the size to which
                                   the data will be reshaped.
         shuffle (bool): Determines whether the dataset will be shuffled or not.
         one_at_a_time (bool, optional): Flag that decides whether the batch size must
@@ -137,7 +143,7 @@ def _prepare_image_ds(ds, target_size, category_depth, one_at_a_time=False):
         object: A dataset object that contains the batched and prefetched data
                 instances along with their shapes and file paths.
     """
-    ds = ds.map(lambda *io_paths_pair: _parse_inputs(io_paths_pair, target_size, category_depth),
+    ds = ds.map(lambda *filepaths: _parse_inputs(filepaths, input_size, category_depth),
                           num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
     batch_size = 1 if one_at_a_time else config.PARAMS["batch_size"]
@@ -147,13 +153,14 @@ def _prepare_image_ds(ds, target_size, category_depth, one_at_a_time=False):
     
     return ds
 
-def _parse_inputs(io_paths_pair, target_size, category_depth):
+@tf.function
+def _parse_inputs(filepaths, target_size, category_depth):
     """This function reads image data dependent on the image type and
        whether it constitutes a stimulus or saliency map. All instances
        are then reshaped and padded to yield the target dimensionality.
 
     Args:
-        io_paths_pair (tuple, str): A tuple with the paths to all file instances.
+        filepaths (tuple, str): A tuple with the paths to all file instances.
                             The first element contains the stimuli and, if
                             present, the second one the ground truth maps.
         target_size (tuple, int): A tuple that specifies the size to which
@@ -164,38 +171,27 @@ def _parse_inputs(io_paths_pair, target_size, category_depth):
               shapes and file paths.
     """
     
-    image_list = []
-    for i, filename in enumerate(io_paths_pair):
-        image_str = tf.io.read_file(filename)
-        channels = 3 if i == 0 else 1 # wether it is the stimuli or the map
+    data_list = []
+    
+    
+    for i, filename in enumerate(filepaths):
+        image = tf.cond(tf.strings.regex_full_match(filename, r".*\.mat"),
+            lambda: tf.numpy_function(_load_mat, [filename, target_size], tf.float32),
+            # i == 0 is the stimuli, hence n of channels is 3
+            lambda: _load_image(filename, target_size, is_fixs_map = i==1, channels = 3 if i==0 else 1))
+        data_list.append(image)
 
-        image = tf.cond(tf.image.is_jpeg(image_str),
-            lambda: tf.image.decode_jpeg(image_str, channels=channels),
-            lambda: tf.image.decode_png(image_str, channels=channels))
-
-        # from int value (0 - 255) to float value (0 - 1)
-        image = tf.image.convert_image_dtype(image, tf.float64)
-
-        original_size = tf.shape(image)[:2]
-
-        image = tf.image.resize_with_pad(image, target_size[0], target_size[1], method=tf.image.ResizeMethod.AREA)
-
-        # if it is the stimuli, transform to 0 - 255 to comply with the input formats
-        if i == 0:
-            image = image * 255
+    # if it is the stimuli, transform to 0 - 255 to comply with the input formats
+    data_list[0] = data_list[0] * 255
         
-        if backend.image_data_format() == 'channels_first':
-            image = tf.transpose(image, (2, 0, 1))
-        
-        image_list.append(image)
+    # original size
+    data_list.append(tf.shape(data_list[0])[:2])
 
-    image_list.append(original_size)
-
-    output_filename = tf.strings.regex_replace(io_paths_pair[0],"\\\\","/")
+    output_filename = tf.strings.regex_replace(filepaths[0],"\\\\","/")
     output_filename = tf.strings.split(output_filename, '/')[-(category_depth + 1):]
-    image_list.append(tf.strings.reduce_join(output_filename, axis=0, separator="/"))
+    data_list.append(tf.strings.reduce_join(output_filename, axis=0, separator="/"))
 
-    return image_list
+    return data_list
 
 def _restore_size(image, target_size):
     current_size = tf.shape(image)[:2]
@@ -207,8 +203,8 @@ def _restore_size(image, target_size):
     new_size = tf.cast(tf.round(new_size), tf.int32)
     
     image = tf.image.resize(image, new_size,
-                                    method=tf.image.ResizeMethod.BICUBIC,
-                                    preserve_aspect_ratio=False)
+                            method=tf.image.ResizeMethod.BICUBIC,
+                            preserve_aspect_ratio=False)
 
     offset = tf.cast((new_size - target_size) /2, tf.int32)
     
@@ -217,7 +213,7 @@ def _restore_size(image, target_size):
     return cropped_image
 
 
-def _get_file_list(data_path, depth=0, suffix=""):
+def _get_file_list(data_path, depth=0):
     """This function detects all image files within the specified parent
        directory for either training or testing. The path content cannot
        be empty, otherwise an error occurs.
@@ -235,8 +231,8 @@ def _get_file_list(data_path, depth=0, suffix=""):
     if os.path.isfile(data_path):
         data_list.append(data_path)
     else:
-        file_pattern = data_path + ("/*" * (depth+1)) + suffix + ".*"
-        data_list = [f for f in glob.glob(file_pattern) if f.endswith(('.jpg', '.jpeg', '.png'))]
+        file_pattern = data_path + ("/*" * (depth+1)) + ".*"
+        data_list = [f for f in glob.glob(file_pattern) if f.endswith(('.jpg', '.jpeg', '.png', '.mat'))]
 
     data_list.sort()
 
@@ -245,7 +241,7 @@ def _get_file_list(data_path, depth=0, suffix=""):
 
     return data_list
 
-def _check_consistency(zipped_file_lists, n_total_files, suffix=""):
+def _check_consistency(zipped_file_lists, n_total_files):
     """A consistency check that makes sure all files could successfully be
        found and stimuli names correspond to the ones of ground truth maps.
 
@@ -258,7 +254,52 @@ def _check_consistency(zipped_file_lists, n_total_files, suffix=""):
     for file_tuple in zipped_file_lists:
         file_names = [os.path.basename(entry) for entry in list(file_tuple)]
         file_names = [os.path.splitext(entry)[0] for entry in file_names]
-        if suffix != "":
-            file_names = [entry.replace(suffix, "") for entry in file_names]
 
         assert len(set(file_names)) == 1, "File name mismatch"
+
+def _load_mat(filename, target_size):
+    fixs = scipy.io.loadmat(filename)
+
+    image = _resize_with_pad_fixation(np.array([coord for gaze in fixs["gaze"] for coord in gaze[0][2]]),
+                                    np.array(target_size),
+                                    np.array(fixs["resolution"][0]), flip=True)
+    image = np.expand_dims(image, axis=0 if backend.image_data_format() == 'channels_first' else -1)
+    return image
+
+@tf.function
+def _load_image(filename, target_size, channels=0, is_fixs_map=False):
+    image_str = tf.io.read_file(filename)
+
+    image = tf.cond(tf.image.is_jpeg(image_str),
+        lambda: tf.image.decode_jpeg(image_str, channels=channels),
+        lambda: tf.image.decode_png(image_str, channels=channels))
+    
+    # from int value (0 - 255) to float value (0 - 1)
+    image = tf.image.convert_image_dtype(image, tf.float64)
+
+    if is_fixs_map:
+        image = tf.numpy_function(_locate_fix_map, [image, target_size], tf.float32)
+    else:
+        image = tf.image.resize_with_pad(image, target_size[0], target_size[1], method=tf.image.ResizeMethod.AREA)
+    
+    if backend.image_data_format() == 'channels_first':
+        image = tf.transpose(image, (2, 0, 1))
+    
+    return image
+
+def _locate_fix_map(image, target_size):
+    image.shape = image.shape[:-1]
+    coords = np.argwhere(image>0.5)
+    image = _resize_with_pad_fixation(coords, np.array(target_size), np.array(image.shape))
+    image = np.expand_dims(image, axis=-1)
+    return image
+
+def _resize_with_pad_fixation(coords, target_size, ori_size, flip=False):
+    factor = np.min(target_size / ori_size)
+    offset = ((target_size - ori_size * factor) / 2).astype("int32")
+    coords = ((coords - 1) * factor).astype("int32")
+    coords = coords[:,::-1] if flip else coords
+    ims = np.zeros(target_size, dtype=np.float32)
+    idxs = np.transpose(coords + offset)
+    ims[idxs[0],idxs[1]] = 1
+    return ims

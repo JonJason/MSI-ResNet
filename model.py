@@ -12,7 +12,7 @@ import config
 class MyModel(Model):
     def __init__(self, encoder, ds_name, phase, **kwargs):
         super().__init__(name='%s_aspp' % encoder, **kwargs)
-        size = config.SPECS[ds_name]["img_size"]
+        size = config.SPECS[ds_name]["input_size"]
 
         if backend.image_data_format() == 'channels_last':
             self._ch_axis = 3

@@ -4,7 +4,6 @@ import zipfile
 
 import requests
 
-
 def download_salicon(data_path):
     """Downloads the SALICON dataset. Three folders are then created that
        contain the stimuli, binary fixation maps, and blurred saliency
@@ -105,12 +104,15 @@ def download_mit1003(data_path):
                 if file_name == "i05june05_static_street_boston_p1010764fixPts.jpg":
                     continue
 
+                file_name = file_name.replace("_fixPts", "")
+                
                 with open(fixations_path + file_name, "wb") as fixations:
                     fixations.write(zip_ref.read(file))
 
             elif file.endswith("Map.jpg"):
                 file_name = os.path.split(file)[1]
 
+                file_name = file_name.replace("_fixMap", "")
                 with open(saliency_path + file_name, "wb") as saliency:
                     saliency.write(zip_ref.read(file))
 
@@ -164,12 +166,12 @@ def download_dataset(ds_name, parent_path):
                         '\tpython main.py -h')
 
 # TODO: update to your model
-def download_pretrained_weights(data_path, key):
+def download_pretrained_weights(dest_path, encoder, ds_name):
     """Downloads the pre-trained weights for the VGG16 model when
        training or the MSI-Net when testing on new data instances.
 
     Args:
-        data_path (str): Defines the path where the weights will be
+        dest_path (str): Defines the path where the weights will be
                          downloaded and extracted to.
         key (str): Describes the type of model for which the weights will
                    be downloaded. This contains the device and dataset.
@@ -178,21 +180,17 @@ def download_pretrained_weights(data_path, key):
                  on the solution provided at [https://bit.ly/2JSVgMQ].
     """
 
-    print(">> Downloading pre-trained weights...", end="", flush=True)
+    print(">> Downloading pre-trained weights with encoder %s on %s..." % (encoder, ds_name), end="", flush=True)
 
-    os.makedirs(data_path, exist_ok=True)
+    os.makedirs(dest_path, exist_ok=True)
 
     ids = {
-        "vgg16_hybrid": "1ff0va472Xs1bvidCwRlW3Ctf7Hbyyn7p",
-        "model_salicon_cpu": "1Xy9C72pcA8DO4CY0rc6B7wsuE9L9DDZY",
-        "model_salicon_gpu": "1Th7fqVYx25ePMZz4LYsjNQWgAu8tJqwL",
-        "model_mit1003_cpu": "1jsESjYtsTvkMqKftA4rdstfB7mSYw5Ec",
-        "model_mit1003_gpu": "1P_tWxBl3igZlzcHGp5H3T3kzsOskWeG6",
-        "model_cat2000_cpu": "1XxaEx7xxD6rHasQTa-VY7T7eVpGhMxuV",
-        "model_cat2000_gpu": "1T6ChEGB6Mf02gKXrENjdeD6XXJkE_jHh"
+        "atrous_resnet": {
+            "salicon": "1u5lQXjS9JY5vLFnzItpw6mOlbAWx5p2p"
+        }
     }
 
-    url = "https://drive.google.com/uc?id=" + ids[key] + "&export=download"
+    url = "https://drive.google.com/uc?id=" + ids[encoder][ds_name] + "&export=download"
 
     session = requests.Session()
 
@@ -203,13 +201,13 @@ def download_pretrained_weights(data_path, key):
         params = {"id": id, "confirm": token}
         response = session.get(url, params=params, stream=True)
 
-    _save_response_content(response, data_path + "tmp.zip")
+    _save_response_content(response, dest_path + "tmp.zip")
 
-    with zipfile.ZipFile(data_path + "tmp.zip", "r") as zip_ref:
+    with zipfile.ZipFile(dest_path + "tmp.zip", "r") as zip_ref:
         for file in zip_ref.namelist():
-            zip_ref.extract(file, data_path)
-
-    os.remove(data_path + "tmp.zip")
+            zip_ref.extract(file, dest_path)
+    
+    os.remove(dest_path + "tmp.zip")
 
     print("done!", flush=True)
 
