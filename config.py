@@ -8,8 +8,8 @@ PARAMS = {
     "n_epochs": 10,
     "batch_size": 10,
     "learning_rate": 1e-5,
-    "loss_fn": "kld_nss_cc",
-    "metrics": ["kld_nss_cc", "cc", "nss"],
+    "loss_fn": "kld",
+    "metrics": ["kld", "cc", "nss", "auc_borji"],
 }
 
 """The predefined input image sizes for each of the 3 datasets.
