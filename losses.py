@@ -42,8 +42,8 @@ def auc_borji(y_true, y_fixs_true, y_pred, n_splits=100, step=0.1, eps=1e-7):
         s = tf.reshape(y_pred[i], [-1])
         f = tf.reshape(y_fixs_true[i], [-1])
         s_th = tf.gather_nd(s, tf.where(f > 0))
-        n_fixs = tf.shape(tf.where(s_th > 0))[0]
-        n_pxs = tf.shape(s)[0]
+        n_fixs = s_th.shape[0]
+        n_pxs = s.shape[0]
 
         # for each fixation, sample Nsplits values from anywhere on the sal map
         r = tf.random.uniform([n_splits, n_fixs], maxval=n_pxs-1, dtype=tf.int32)
