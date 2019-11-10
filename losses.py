@@ -68,7 +68,7 @@ def kld_nss_cc(y_true, y_fixs_true, y_pred):
     kld_score = kld(y_true, y_fixs_true, y_pred)
     cc_score = cc(y_true, y_fixs_true, y_pred)
     nss_score = nss(y_true, y_fixs_true, y_pred)
-    return 10 * kld_score - 2 * cc_score - nss_score
+    return 25 * kld_score - 2 * cc_score - nss_score
 
 def _normalize(x):
     x = x - tf.reduce_mean(x, axis=(1, 2, 3), keepdims=True)
