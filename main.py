@@ -18,9 +18,12 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 logging.getLogger("tensorflow").setLevel(logging.ERROR)
 loss_fn_name = config.PARAMS["loss_fn"]
 
-def _update_metrics(metrics, y_true, y_fixs_true, y_pred):
+def _update_metrics(metrics, y_true, y_fixs_true, y_pred, loss):
     for name, metric in metrics.items():
-        metric(globals().get(name, None)(y_true, y_fixs_true, y_pred))
+        if name == loss_fn_name:
+            metric(loss)
+        else:
+            metric(globals().get(name, None)(y_true, y_fixs_true, y_pred))
 
 def _print_metrics(phase, res_metrics):
     res_printer = lambda x: "{}_{}: {}".format(phase, x[0], ('%.4f' if x[1].result() > 1e-3 else '%.4e') % x[1].result())
@@ -159,13 +162,13 @@ def train_model(ds_name, encoder, paths):
         train_progbar = Progbar(n_train, stateful_metrics=metrics)
         for train_x, train_fixs, train_y_true, train_ori_sizes, train_filenames in train_ds:
             train_y_pred, train_loss = train_step(train_x, train_y_true, train_fixs, model, loss_fn, optimizer)
-            _update_metrics(train_metrics, train_y_true, train_fixs, train_y_pred)
+            _update_metrics(train_metrics, train_y_true, train_fixs, train_y_pred, train_loss)
             train_progbar.add(train_x.shape[0], list(map(lambda x: (x[0],x[1].result()), train_metrics.items())))
 
         val_progbar = Progbar(n_val, stateful_metrics=metrics)
         for val_x, val_fixs, val_y_true, val_ori_sizes, val_filenames in val_ds:
             val_y_pred, val_loss = val_step(val_x, val_y_true, val_fixs, model, loss_fn)
-            _update_metrics(val_metrics, val_y_true, val_fixs, val_y_pred)
+            _update_metrics(val_metrics, val_y_true, val_fixs, val_y_pred, val_loss)
             val_progbar.add(val_x.shape[0], list(map(lambda x: (x[0],x[1].result()), val_metrics.items())))
 
         train_metrics_results = _print_metrics("t",train_metrics)
