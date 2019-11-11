@@ -14,6 +14,12 @@ from tensorflow.keras import backend
 
 # TODO: fix comments for all functions
 def load_train_dataset(ds_name, data_path):
+    # download dataset if not exists
+    if not os.path.exists(data_path):
+        parent_path = os.path.dirname(os.path.dirname(data_path))
+        parent_path = os.path.join(parent_path, "")
+        download.download_dataset(ds_name, parent_path)
+
     spec = config.SPECS[ds_name]
     input_size = spec["input_size"]
     category_depth = 1 if spec.get("categorical", False) else 0
@@ -21,26 +27,19 @@ def load_train_dataset(ds_name, data_path):
     n_train = spec["n_train"]
     has_val = "n_val" in spec
     if not has_val and "val_portion" not in spec:
-        raise NotImplementedError('Either "n_val" or "val_portion" must be specified')
+        raise NotImplementedError('Either "has_val" or "val_portion" must be specified in dataset configuration')
 
     train_imgs_dir = data_path + "stimuli"
-    train_maps_dir = data_path + "maps"
     train_fixs_dir = data_path + "fixations"
+    train_maps_dir = data_path + "maps"
 
     if has_val:
         n_val = spec["n_val"]
         train_imgs_dir += "/train"
-        train_maps_dir += "/train"
         train_fixs_dir += "/train"
+        train_maps_dir += "/train"
     else:
         n_val = math.floor(n_train * spec["val_portion"])
-
-    # download dataset if not exists
-    if not os.path.exists(data_path):
-        parent_path = os.path.dirname(os.path.dirname(data_path))
-        parent_path = os.path.join(parent_path, "")
-
-        download.download_dataset(ds_name, parent_path)
     
     # loading dataset
     train_x = _get_file_list(train_imgs_dir, category_depth)
@@ -83,13 +82,12 @@ def load_train_dataset(ds_name, data_path):
 
         n_train -= n_val
 
-    train_ds = _prepare_image_ds(train_ds, input_size, category_depth)
-    val_ds = _prepare_image_ds(val_ds, input_size, category_depth)
+    train_ds = _prepare_image_ds(train_ds, ds_name, input_size, category_depth)
+    val_ds = _prepare_image_ds(val_ds, ds_name, input_size, category_depth)
 
     return ((train_ds, n_train), (val_ds, n_val))
 
 def load_test_dataset(ds_name, data_path, categorical=False):
-    
     spec = config.SPECS[ds_name]
     input_size = spec["input_size"]
     category_depth = 1 if categorical else 0
@@ -97,9 +95,44 @@ def load_test_dataset(ds_name, data_path, categorical=False):
     test_x = _get_file_list(data_path, category_depth)
     n_test = len(test_x) 
     test_ds = tf.data.Dataset.from_tensor_slices(test_x)
-    test_ds = _prepare_image_ds(test_ds, input_size, category_depth)
+    test_ds = _prepare_image_ds(test_ds, ds_name, input_size, category_depth)
 
     return (test_ds, n_test)
+
+
+def load_eval_dataset(ds_name, data_path, categorical=False):
+    # download dataset if not exists
+    if not os.path.exists(data_path):
+        parent_path = os.path.dirname(os.path.dirname(data_path))
+        parent_path = os.path.join(parent_path, "")
+        download.download_dataset(ds_name, parent_path)
+
+    spec = config.SPECS[ds_name]
+    input_size = spec["input_size"]
+    category_depth = 1 if spec.get("categorical", False) else 0
+
+    has_val = "n_val" in spec
+    if not has_val and "val_portion" not in spec:
+        raise NotImplementedError('Either "has_val" or "val_portion" must be specified in dataset configuration')
+
+    n_eval = spec["n_val"] if has_val else spec["n_train"]
+
+    eval_imgs_dir = data_path + "stimuli"
+    eval_fixs_dir = data_path + "fixations"
+    eval_maps_dir = data_path + "maps"
+
+    if has_val:
+        eval_imgs_dir += "/val"
+        eval_fixs_dir += "/val"
+        eval_maps_dir += "/val"
+    
+    eval_x = _get_file_list(eval_imgs_dir, category_depth)
+    eval_fixs = _get_file_list(eval_fixs_dir, category_depth)
+    eval_y = _get_file_list(eval_maps_dir, category_depth)
+    _check_consistency(zip(eval_x, eval_fixs, eval_y), n_eval)
+    eval_ds = tf.data.Dataset.from_tensor_slices((eval_x, eval_fixs, eval_y))
+    eval_ds = _prepare_image_ds(eval_ds, ds_name, input_size, category_depth, one_at_a_time=True)
+    return (eval_ds, n_eval)
 
 def postprocess_saliency_map(saliency_map, target_size):
     """This function resizes and crops a single saliency map to the original
@@ -127,7 +160,7 @@ def postprocess_saliency_map(saliency_map, target_size):
 
     return saliency_map_jpeg
 
-def _prepare_image_ds(ds, input_size, category_depth, one_at_a_time=False):
+def _prepare_image_ds(ds, ds_name, input_size, category_depth, one_at_a_time=False):
     """Here the list of file directories is shuffled (only when training),
        loaded, batched, and prefetched to ensure high GPU utilization.
 
@@ -143,7 +176,7 @@ def _prepare_image_ds(ds, input_size, category_depth, one_at_a_time=False):
         object: A dataset object that contains the batched and prefetched data
                 instances along with their shapes and file paths.
     """
-    ds = ds.map(lambda *filepaths: _parse_inputs(filepaths, input_size, category_depth),
+    ds = ds.map(lambda *filepaths: _parse_inputs(filepaths, ds_name, input_size, category_depth),
                           num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
     batch_size = 1 if one_at_a_time else config.PARAMS["batch_size"]
@@ -154,7 +187,7 @@ def _prepare_image_ds(ds, input_size, category_depth, one_at_a_time=False):
     return ds
 
 @tf.function
-def _parse_inputs(filepaths, target_size, category_depth):
+def _parse_inputs(filepaths, ds_name, target_size, category_depth):
     """This function reads image data dependent on the image type and
        whether it constitutes a stimulus or saliency map. All instances
        are then reshaped and padded to yield the target dimensionality.
@@ -176,7 +209,7 @@ def _parse_inputs(filepaths, target_size, category_depth):
     
     for i, filename in enumerate(filepaths):
         image = tf.cond(tf.strings.regex_full_match(filename, r".*\.mat"),
-            lambda: tf.numpy_function(_load_mat, [filename, target_size], tf.float32),
+            lambda: tf.numpy_function(_load_mat, [filename, ds_name, target_size], tf.float32),
             # i == 0 is the stimuli, hence n of channels is 3
             lambda: _load_image(filename, target_size, is_fixs_map = i==1, channels = 3 if i==0 else 1))
         data_list.append(image)
@@ -187,8 +220,7 @@ def _parse_inputs(filepaths, target_size, category_depth):
     # original size
     data_list.append(tf.shape(data_list[0])[:2])
 
-    output_filename = tf.strings.regex_replace(filepaths[0],"\\\\","/")
-    output_filename = tf.strings.split(output_filename, '/')[-(category_depth + 1):]
+    output_filename = tf.strings.split(filepaths[0], '\\')[-(category_depth + 1):]
     data_list.append(tf.strings.reduce_join(output_filename, axis=0, separator="/"))
 
     return data_list
@@ -257,12 +289,10 @@ def _check_consistency(zipped_file_lists, n_total_files):
 
         assert len(set(file_names)) == 1, "File name mismatch"
 
-def _load_mat(filename, target_size):
+def _load_mat(filename, ds_name, target_size):
     fixs = scipy.io.loadmat(filename)
 
-    image = _resize_with_pad_fixation(np.array([coord for gaze in fixs["gaze"] for coord in gaze[0][2]]),
-                                    np.array(target_size),
-                                    np.array(fixs["resolution"][0]), flip=True)
+    image = _get_fixation_map(fixs, ds_name.decode("utf-8"), target_size)
     image = np.expand_dims(image, axis=0 if backend.image_data_format() == 'channels_first' else -1)
     return image
 
@@ -303,3 +333,16 @@ def _resize_with_pad_fixation(coords, target_size, ori_size, flip=False):
     idxs = np.transpose(coords + offset)
     ims[idxs[0],idxs[1]] = 1
     return ims
+
+def _get_fixation_map(fixs, ds_name, target_size):
+    if ds_name == "salicon":
+        return _resize_with_pad_fixation([coord for gaze in fixs["gaze"] for coord in gaze[0][2]],
+                                        np.array(target_size),
+                                        np.array(fixs["resolution"][0]),
+                                        flip=True)
+    elif ds_name == "cat2000":
+        return _resize_with_pad_fixation(np.argwhere(fixs["fixLocs"] > 0.5),
+                                        np.array(target_size),
+                                        np.array(fixs["fixLocs"].shape))
+    else:
+        raise ValueError("Coordinates parser for %s has not been declared"%ds_name)

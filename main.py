@@ -51,7 +51,7 @@ def define_paths(current_path, args):
     weights_path = current_path + "/weights/"
     ckpts_path = weights_path + "ckpts/"
 
-    if args.action == "train":
+    if args.action in ["train", "eval"]:
         if args.data not in data_path:
             data_path += args.data + "/"
 
@@ -106,10 +106,10 @@ def train_model(ds_name, encoder, paths):
     if ds_name != "salicon":
         salicon_weights = paths["weights"] + w_filename_template % (encoder, "salicon", loss_fn_name)
         if os.path.exists(salicon_weights):
-            model.load_weights(salicon_weights)
             print("Salicon weights are loaded!")
         else:
             download.download_pretrained_weights(paths["weights"], encoder, "salicon", loss_fn_name)
+        model.load_weights(salicon_weights)
         del salicon_weights
 
     model.summary()
@@ -130,10 +130,10 @@ def train_model(ds_name, encoder, paths):
     met_to_ckpt_kwargs = lambda phase, met: list(map(lambda x: ("%s_%s"%(phase,x[0]), x[1]), met.items()))
     metrics_as_ckpt_kwargs = dict(met_to_ckpt_kwargs("train", train_metrics) + met_to_ckpt_kwargs("val", val_metrics))
 
-    ckpts_path = paths["ckpts"] + "%s/%s/" % (encoder, ds_name)
+    ckpts_path = paths["ckpts"] + "%s/%s/%s/" % (encoder, ds_name, loss_fn_name)
     ckpt = tf.train.Checkpoint(net=model, **metrics_as_ckpt_kwargs)
     ckpt_manager = tf.train.CheckpointManager(ckpt, ckpts_path, max_to_keep=n_epochs,
-                                                checkpoint_name="%s_ckpt"%loss_fn_name)
+                                                checkpoint_name="%s_ckpt"%("_".join(sorted(metrics))))
     start_epoch = 0
     
     # if a checkpoint exists, restore the latest checkpoint.
@@ -220,7 +220,7 @@ def test_model(ds_name, encoder, paths, categorical=False):
         paths (dict, str): A dictionary with all path elements.
     """
 
-    w_filename_template = "/%s_%s_weights.h5" # [encoder]_[ds_name]_weights.h5
+    w_filename_template = "/%s_%s_%s_weights.h5" # [encoder]_[ds_name]_weights.h5
 
     (test_ds, n_test) = data.load_test_dataset(ds_name, paths["data"], categorical)
     
@@ -230,15 +230,14 @@ def test_model(ds_name, encoder, paths, categorical=False):
 
     weights_path = paths["weights"] + w_filename_template % (encoder, ds_name, loss_fn_name)
     if os.path.exists(weights_path):
-        model.load_weights(weights_path)
-        print("Salicon weights are loaded!")
+        print("weights are loaded!")
     else:
         download.download_pretrained_weights(paths["weights"], encoder, ds_name, loss_fn_name)
-    
+    model.load_weights(weights_path)
     del weights_path
 
     print(">> Start predicting using model trained on %s..." % ds_name.upper())
-    results_path = paths["results"] + "%s/%s/" % (ds_name, encoder)
+    results_path = paths["results"] + "%s/%s/%s/" % (ds_name, encoder, loss_fn_name)
 
     # Preparing progbar
     test_progbar = Progbar(n_test)
@@ -249,8 +248,68 @@ def test_model(ds_name, encoder, paths, categorical=False):
             tf.io.write_file(results_path + filename.decode("utf-8"), img)
         test_progbar.add(test_images.shape[0])
 
-def eval_results(ds_name, encoder, paths, categorical=False):
-    pass
+def eval_results(ds_name, encoder, paths):
+    """The main function for executing network training. It loads the specified
+       dataset iterator, saliency model, and helper classes. Training is then
+       performed in a new session by iterating over all batches for a number of
+       epochs. After validation on an independent set, the model is saved and
+       the training history is updated.
+
+    Args:
+        ds_name (str): Denotes the dataset to be used during training.
+        paths (dict, str): A dictionary with all path elements.
+    """
+
+    w_filename_template = "/%s_%s_%s__weights.h5" # [encoder]_[ds_name]_[loss_fn_name]_weights.h5
+
+    (eval_ds, n_eval) = data.load_eval_dataset(ds_name, paths["data"])
+    
+    print(">> Preparing model with encoder %s..." % encoder)
+
+    model = MyModel(encoder, ds_name, "train")
+
+    weights_path = paths["weights"] + w_filename_template % (encoder, ds_name, loss_fn_name)
+    if os.path.exists(weights_path):
+        print("weights are loaded!")
+    # else:
+    #     download.download_pretrained_weights(paths["weights"], encoder, "salicon", loss_fn_name)
+    # model.load_weights(weights_path)
+    del weights_path
+
+    model.summary()
+
+    # Preparing
+    loss_fn = globals().get(loss_fn_name, None)
+
+    metrics = config.PARAMS["metrics"]
+    eval_metrics = {}
+    for name in metrics:
+        eval_metrics[name] = tf.keras.metrics.Mean(name="eval_%s"%name)
+
+    print("\n>> Start evaluating model on %s..." % ds_name.upper())
+    print(("Evaluation details:" +
+    "\n{0:<4}Metrics: {2}").format(" ", loss_fn_name, ", ".join(metrics), **config.PARAMS))
+    print("_" * 65)
+
+    eval_progbar = Progbar(n_eval, stateful_metrics=metrics)
+    categorical = config.SPECS[ds_name]["categorical"]
+    cat_metrics = {}
+    for eval_x, eval_fixs, eval_y_true, eval_ori_sizes, eval_filenames in eval_ds:
+        eval_y_pred, eval_loss = val_step(eval_x, eval_y_true, eval_fixs, model, loss_fn)
+        if categorical:
+            cat = "/".join(eval_filenames[0].numpy().decode("utf-8").split("/")[:-1])
+            if not cat in cat_metrics:
+                cat_metrics[cat] = {}
+                for name in metrics:
+                    cat_metrics[cat][name] = tf.keras.metrics.Mean(name="%s_%s"%(cat,name))
+            _update_metrics(cat_metrics[cat], eval_y_true, eval_fixs, eval_y_pred, eval_loss)
+        _update_metrics(eval_metrics, eval_y_true, eval_fixs, eval_y_pred, eval_loss)
+        eval_progbar.add(eval_x.shape[0], list(map(lambda x: (x[0],x[1].result()), eval_metrics.items())))
+
+    for cat, cat_met in cat_metrics.items():
+        print('Results ({}): {}'.format(cat, _print_metrics("v", cat_met)))
+    print('Results All: {}'.format(_print_metrics("v", eval_metrics)))
+
 
 def main():
     """The main function reads the command line arguments, invokes the
@@ -327,7 +386,7 @@ def main():
                     layer.summary()
 
     elif action == "eval":
-        eval_results(args.data, encoder_name, define_paths(current_path, args), args.categorical)
+        eval_results(args.data, encoder_name, define_paths(current_path, args))
 
 
 if __name__ == "__main__":
