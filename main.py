@@ -260,7 +260,7 @@ def eval_results(ds_name, encoder, paths):
         paths (dict, str): A dictionary with all path elements.
     """
 
-    w_filename_template = "/%s_%s_%s__weights.h5" # [encoder]_[ds_name]_[loss_fn_name]_weights.h5
+    w_filename_template = "/%s_%s_%s_weights.h5" # [encoder]_[ds_name]_[loss_fn_name]_weights.h5
 
     (eval_ds, n_eval) = data.load_eval_dataset(ds_name, paths["data"])
     
@@ -271,9 +271,9 @@ def eval_results(ds_name, encoder, paths):
     weights_path = paths["weights"] + w_filename_template % (encoder, ds_name, loss_fn_name)
     if os.path.exists(weights_path):
         print("weights are loaded!")
-    # else:
-    #     download.download_pretrained_weights(paths["weights"], encoder, "salicon", loss_fn_name)
-    # model.load_weights(weights_path)
+    else:
+        download.download_pretrained_weights(paths["weights"], encoder, "salicon", loss_fn_name)
+    model.load_weights(weights_path)
     del weights_path
 
     model.summary()
@@ -292,7 +292,7 @@ def eval_results(ds_name, encoder, paths):
     print("_" * 65)
 
     eval_progbar = Progbar(n_eval, stateful_metrics=metrics)
-    categorical = config.SPECS[ds_name]["categorical"]
+    categorical = config.SPECS[ds_name].get("categorical", False)
     cat_metrics = {}
     for eval_x, eval_fixs, eval_y_true, eval_ori_sizes, eval_filenames in eval_ds:
         eval_y_pred, eval_loss = val_step(eval_x, eval_y_true, eval_fixs, model, loss_fn)

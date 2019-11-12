@@ -187,7 +187,7 @@ def download_pretrained_weights(dest_path, encoder, ds_name, loss_fn_name):
     ids = {
         "atrous_resnet": {
             "salicon": {
-                "auc_borji":"1u5lQXjS9JY5vLFnzItpw6mOlbAWx5p2p"
+                "kld":"1u5lQXjS9JY5vLFnzItpw6mOlbAWx5p2p"
             }
         }
     }

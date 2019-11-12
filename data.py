@@ -336,7 +336,7 @@ def _resize_with_pad_fixation(coords, target_size, ori_size, flip=False):
 
 def _get_fixation_map(fixs, ds_name, target_size):
     if ds_name == "salicon":
-        return _resize_with_pad_fixation([coord for gaze in fixs["gaze"] for coord in gaze[0][2]],
+        return _resize_with_pad_fixation(np.array([coord for gaze in fixs["gaze"] for coord in gaze[0][2]]),
                                         np.array(target_size),
                                         np.array(fixs["resolution"][0]),
                                         flip=True)
