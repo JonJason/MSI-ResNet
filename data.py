@@ -127,7 +127,7 @@ def load_eval_dataset(ds_name, data_path, categorical=False):
     eval_fixs = _get_file_list(eval_fixs_dir, category_depth)
     _check_consistency(zip(eval_x, eval_y, eval_fixs), n_eval)
     eval_ds = tf.data.Dataset.from_tensor_slices((eval_x, eval_y, eval_fixs))
-    eval_ds = _prepare_image_ds(eval_ds, ds_name, input_size, category_depth)
+    eval_ds = _prepare_image_ds(eval_ds, ds_name, input_size, category_depth, one_at_a_time=True)
     return (eval_ds, n_eval)
 
 def postprocess_saliency_map(saliency_map, target_size, as_image=False):

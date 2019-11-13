@@ -188,6 +188,9 @@ def download_pretrained_weights(dest_path, encoder, ds_name, loss_fn_name):
         "atrous_resnet": {
             "salicon": {
                 "kld":"1u5lQXjS9JY5vLFnzItpw6mOlbAWx5p2p"
+            },
+            "mit1003": {
+                "kld":"150g8MsiAlYEW338LD0hK2OikrW-FWbrn"
             }
         }
     }
