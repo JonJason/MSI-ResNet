@@ -7,19 +7,19 @@ if backend.image_data_format() == 'channels_last':
 else:
     _ch_axis = 1
 
-def kld(y_true, y_fixs_true, y_pred, eps=1e-7):
+def kld(y_true, y_pred, eps=1e-7):
     y_true /= eps + tf.reduce_sum(y_true, axis=(1,2,3), keepdims=True)
     y_pred /= eps + tf.reduce_sum(y_pred, axis=(1,2,3), keepdims=True)
     loss = y_true * tf.math.log(eps + y_true / (eps + y_pred))
     return tf.reduce_mean(tf.reduce_sum(loss, axis=(1,2,3)))
 
-def nss(y_true, y_fixs_true, y_pred):
+def nss(y_fixs_true, y_pred):
     y_pred *= 255
     y_fixs_true *= 255
     y_pred = _normalize(y_pred)
     return tf.reduce_mean(y_pred * y_fixs_true)
 
-def cc(y_true, y_fixs_true, y_pred):
+def cc(y_true, y_pred):
     y_true = _normalize(y_true)
     y_pred = _normalize(y_pred)
     stacked = tf.reshape(tf.stack([y_true, y_pred], axis=1), [y_true.shape[0], 2,-1])
@@ -30,7 +30,7 @@ def cc(y_true, y_fixs_true, y_pred):
         scores = tf.tensor_scatter_nd_update(scores, [[i]], [score])
     return tf.reduce_mean(scores)
 
-def auc_borji(y_true, y_fixs_true, y_pred, n_splits=100, step=0.1, eps=1e-7):
+def auc_borji(y_fixs_true, y_pred, n_splits=100, step=0.1, eps=1e-7):
 
     # reduce channel shape
     new_shape = tf.gather_nd(tf.shape(y_pred), tf.where(tf.range(4)!=_ch_axis))
@@ -65,11 +65,10 @@ def auc_borji(y_true, y_fixs_true, y_pred, n_splits=100, step=0.1, eps=1e-7):
 
     return tf.reduce_mean(scores)
 
-def kld_nss_cc(y_true, y_fixs_true, y_pred):
-    kld_score = kld(y_true, y_fixs_true, y_pred)
-    cc_score = cc(y_true, y_fixs_true, y_pred)
-    nss_score = nss(y_true, y_fixs_true, y_pred)
-    return 25 * kld_score - 2 * cc_score - nss_score
+def kld_cc(y_true, y_pred):
+    kld_score = kld(y_true, y_pred)
+    cc_score = cc(y_true, y_pred)
+    return kld_score - cc_score + 2
 
 def _normalize(x):
     x = x - tf.reduce_mean(x, axis=(1, 2, 3), keepdims=True)

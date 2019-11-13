@@ -31,8 +31,7 @@ WEIGHTS_PATH_NO_TOP = ('https://github.com/fchollet/deep-learning-models/'
                        'releases/download/v0.2/'
                        'resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5')
 
-
-def identity_block_atrous(input_tensor, kernel_size, filters, stage, block, dilation_rate=(2, 2)):
+def identity_block(input_tensor, kernel_size, filters, stage, block, dilation_rate=(1, 1)):
     """The identity block is the block that has no conv layer at shortcut.
 
     # Arguments
@@ -42,6 +41,7 @@ def identity_block_atrous(input_tensor, kernel_size, filters, stage, block, dila
         filters: list of integers, the filters of 3 conv layer at main path
         stage: integer, current stage label, used for generating layer names
         block: 'a','b'..., current block label, used for generating layer names
+        dilation_rate: of the 2b layer
 
     # Returns
         Output tensor for the block.
@@ -60,113 +60,9 @@ def identity_block_atrous(input_tensor, kernel_size, filters, stage, block, dila
     x = BatchNormalization(axis=bn_axis, name=bn_name_base + '2a')(x)
     x = Activation('relu')(x)
 
+    # modified
     x = Conv2D(filters2, kernel_size,
                       dilation_rate=dilation_rate,
-                      padding='same',
-                      kernel_initializer='he_normal',
-                      name=conv_name_base + '2b')(x)
-    x = BatchNormalization(axis=bn_axis, name=bn_name_base + '2b')(x)
-    x = Activation('relu')(x)
-
-    x = Conv2D(filters3, (1, 1),
-                      kernel_initializer='he_normal',
-                      name=conv_name_base + '2c')(x)
-    x = BatchNormalization(axis=bn_axis, name=bn_name_base + '2c')(x)
-
-    x = tf.keras.layers.add([x, input_tensor])
-    x = Activation('relu')(x)
-    return x
-
-
-def conv_block_atrous(input_tensor,
-               kernel_size,
-               filters,
-               stage,
-               block,
-               dilation_rate=(2, 2)):
-    """A block that has a conv layer at shortcut.
-
-    # Arguments
-        input_tensor: input tensor
-        kernel_size: default 3, the kernel size of
-            middle conv layer at main path
-        filters: list of integers, the filters of 3 conv layer at main path
-        stage: integer, current stage label, used for generating layer names
-        block: 'a','b'..., current block label, used for generating layer names
-        dilation_rate: Rate of the dilations in the second convolution layer in the block.
-
-    # Returns
-        Output tensor for the block.
-
-    Note that from stage 3,
-    the first conv layer at main path is with strides=(2, 2)
-    And the shortcut should have strides=(2, 2) as well
-    """
-    filters1, filters2, filters3 = filters
-    if backend.image_data_format() == 'channels_last':
-        bn_axis = 3
-    else:
-        bn_axis = 1
-    conv_name_base = 'res' + str(stage) + block + '_branch'
-    bn_name_base = 'bn' + str(stage) + block + '_branch'
-
-    x = Conv2D(filters1, (1, 1),
-                      kernel_initializer='he_normal',
-                      name=conv_name_base + '2a')(input_tensor)
-    x = BatchNormalization(axis=bn_axis, name=bn_name_base + '2a')(x)
-    x = Activation('relu')(x)
-
-    x = Conv2D(filters2, kernel_size,
-                      dilation_rate=dilation_rate, padding='same',
-                      kernel_initializer='he_normal',
-                      name=conv_name_base + '2b')(x)
-    x = BatchNormalization(axis=bn_axis, name=bn_name_base + '2b')(x)
-    x = Activation('relu')(x)
-
-    x = Conv2D(filters3, (1, 1),
-                      kernel_initializer='he_normal',
-                      name=conv_name_base + '2c')(x)
-    x = BatchNormalization(axis=bn_axis, name=bn_name_base + '2c')(x)
-
-    shortcut = Conv2D(filters3, (1, 1),
-                             kernel_initializer='he_normal',
-                             name=conv_name_base + '1')(input_tensor)
-    shortcut = BatchNormalization(
-        axis=bn_axis, name=bn_name_base + '1')(shortcut)
-
-    x = tf.keras.layers.add([x, shortcut])
-    x = Activation('relu')(x)
-    return x
-
-def identity_block(input_tensor, kernel_size, filters, stage, block):
-    """The identity block is the block that has no conv layer at shortcut.
-
-    # Arguments
-        input_tensor: input tensor
-        kernel_size: default 3, the kernel size of
-            middle conv layer at main path
-        filters: list of integers, the filters of 3 conv layer at main path
-        stage: integer, current stage label, used for generating layer names
-        block: 'a','b'..., current block label, used for generating layer names
-
-    # Returns
-        Output tensor for the block.
-    """
-    filters1, filters2, filters3 = filters
-    if backend.image_data_format() == 'channels_last':
-        bn_axis = 3
-    else:
-        bn_axis = 1
-    conv_name_base = 'res' + str(stage) + block + '_branch'
-    bn_name_base = 'bn' + str(stage) + block + '_branch'
-
-    x = Conv2D(filters1, (1, 1),
-                      kernel_initializer='he_normal',
-                      name=conv_name_base + '2a')(input_tensor)
-    x = BatchNormalization(axis=bn_axis, name=bn_name_base + '2a')(x)
-    x = Activation('relu')(x)
-
-    x = Conv2D(filters2, kernel_size,
                       padding='same',
                       kernel_initializer='he_normal',
                       name=conv_name_base + '2b')(x)
@@ -188,7 +84,7 @@ def conv_block(input_tensor,
                filters,
                stage,
                block,
-               strides=(2, 2)):
+               rate=(2, 2), atrous=False):
     """A block that has a conv layer at shortcut.
 
     # Arguments
@@ -198,7 +94,9 @@ def conv_block(input_tensor,
         filters: list of integers, the filters of 3 conv layer at main path
         stage: integer, current stage label, used for generating layer names
         block: 'a','b'..., current block label, used for generating layer names
-        strides: Strides for the first conv layer in the block.
+        rate: Strides for the first conv layer or Dilation rate for the second conv layer in the block.
+        atrous: specify wether rate is for dilation or strides.
+
 
     # Returns
         Output tensor for the block.
@@ -215,15 +113,25 @@ def conv_block(input_tensor,
     conv_name_base = 'res' + str(stage) + block + '_branch'
     bn_name_base = 'bn' + str(stage) + block + '_branch'
 
+    if atrous:
+        strides = (1,1)
+        dilation_rate = rate
+    else:
+        strides = rate
+        dilation_rate = (1,1)
+
+    # strides value behaviour is different from original ResNet 
     x = Conv2D(filters1, (1, 1), strides=strides,
                       kernel_initializer='he_normal',
                       name=conv_name_base + '2a')(input_tensor)
     x = BatchNormalization(axis=bn_axis, name=bn_name_base + '2a')(x)
     x = Activation('relu')(x)
 
+    # modified: add dilation_rate
     x = Conv2D(filters2, kernel_size, padding='same',
-                      kernel_initializer='he_normal',
-                      name=conv_name_base + '2b')(x)
+                    dilation_rate=dilation_rate,
+                    kernel_initializer='he_normal',
+                    name=conv_name_base + '2b')(x)
     x = BatchNormalization(axis=bn_axis, name=bn_name_base + '2b')(x)
     x = Activation('relu')(x)
 
@@ -232,6 +140,7 @@ def conv_block(input_tensor,
                       name=conv_name_base + '2c')(x)
     x = BatchNormalization(axis=bn_axis, name=bn_name_base + '2c')(x)
 
+    # strides value behaviour is different from original ResNet
     shortcut = Conv2D(filters3, (1, 1), strides=strides,
                              kernel_initializer='he_normal',
                              name=conv_name_base + '1')(input_tensor)
@@ -322,7 +231,7 @@ def AtrousResNet50(weights='imagenet',
     x = MaxPool2D((3, 3), strides=(2, 2))(x)
 
     # conv_2
-    x = conv_block(x, 3, [64, 64, 256], stage=2, block='a', strides=(1, 1))
+    x = conv_block(x, 3, [64, 64, 256], stage=2, block='a', rate=(1, 1))
     x = identity_block(x, 3, [64, 64, 256], stage=2, block='b')
     x = identity_block(x, 3, [64, 64, 256], stage=2, block='c')
 
@@ -334,18 +243,18 @@ def AtrousResNet50(weights='imagenet',
     
     # output_1 = x
     # conv_4
-    x = conv_block_atrous(x, 3, [256, 256, 1024], stage=4, block='a', dilation_rate=(2, 2))
-    x = identity_block_atrous(x, 3, [256, 256, 1024], stage=4, block='b', dilation_rate=(2, 2))
-    x = identity_block_atrous(x, 3, [256, 256, 1024], stage=4, block='c', dilation_rate=(2, 2))
-    x = identity_block_atrous(x, 3, [256, 256, 1024], stage=4, block='d', dilation_rate=(2, 2))
-    x = identity_block_atrous(x, 3, [256, 256, 1024], stage=4, block='e', dilation_rate=(2, 2))
-    x = identity_block_atrous(x, 3, [256, 256, 1024], stage=4, block='f', dilation_rate=(2, 2))
+    x = conv_block(x, 3, [256, 256, 1024], stage=4, block='a', rate=(2, 2), atrous=True)
+    x = identity_block(x, 3, [256, 256, 1024], stage=4, block='b', dilation_rate=(2, 2))
+    x = identity_block(x, 3, [256, 256, 1024], stage=4, block='c', dilation_rate=(2, 2))
+    x = identity_block(x, 3, [256, 256, 1024], stage=4, block='d', dilation_rate=(2, 2))
+    x = identity_block(x, 3, [256, 256, 1024], stage=4, block='e', dilation_rate=(2, 2))
+    x = identity_block(x, 3, [256, 256, 1024], stage=4, block='f', dilation_rate=(2, 2))
     
     # output_2 = x
     # conv_5
-    x = conv_block_atrous(x, 3, [512, 512, 2048], stage=5, block='a', dilation_rate=(4, 4))
-    x = identity_block_atrous(x, 3, [512, 512, 2048], stage=5, block='b', dilation_rate=(4, 4))
-    x = identity_block_atrous(x, 3, [512, 512, 2048], stage=5, block='c', dilation_rate=(4, 4))
+    x = conv_block(x, 3, [512, 512, 2048], stage=5, block='a', rate=(4, 4), atrous=True)
+    x = identity_block(x, 3, [512, 512, 2048], stage=5, block='b', dilation_rate=(4, 4))
+    x = identity_block(x, 3, [512, 512, 2048], stage=5, block='c', dilation_rate=(4, 4))
 
     # conv_6 (additional)
     x = Conv2D(512, 3, padding='same', activation='relu')(x)

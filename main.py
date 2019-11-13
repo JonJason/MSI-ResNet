@@ -4,7 +4,7 @@ import os
 
 import logging
 import download
-from losses import kld, nss, cc, auc_borji, kld_nss_cc
+from losses import kld, nss, cc, auc_borji, kld_cc
 
 import tensorflow as tf
 from tensorflow.keras import backend
@@ -18,15 +18,15 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 logging.getLogger("tensorflow").setLevel(logging.ERROR)
 loss_fn_name = config.PARAMS["loss_fn"]
 
-def _update_metrics(metrics, y_true, y_fixs_true, y_pred, loss):
+def _update_metrics(metrics, y_true, y_fixs_true, y_pred):
     for name, metric in metrics.items():
-        if name == loss_fn_name:
-            metric(loss)
-        else:
-            metric(globals().get(name, None)(y_true, y_fixs_true, y_pred))
+        inputs = []
+        inputs.append(y_true if config.MET_SPECS[name] == "m" else y_fixs_true)
+        inputs.append(y_pred)
+        metric(globals().get(name, None)(*inputs))
 
-def _print_metrics(phase, res_metrics):
-    res_printer = lambda x: "{}_{}: {}".format(phase, x[0], ('%.4f' if x[1].result() > 1e-3 else '%.4e') % x[1].result())
+def _print_metrics(res_metrics):
+    res_printer = lambda x: "{}: {}".format(x[0], ('%.4f' if x[1].result() > 1e-3 else '%.4e') % x[1].result())
     return " - ".join(list(map(res_printer, res_metrics.items())))
 
 def define_paths(current_path, args):
@@ -65,18 +65,18 @@ def define_paths(current_path, args):
     return paths
 
 @tf.function
-def train_step(images, y_true, y_fixs_true, model, loss_fn, optimizer):
+def train_step(images, y_true, model, loss_fn, optimizer):
     with tf.GradientTape() as tape:
         y_pred = model(images)
-        loss = loss_fn(y_true, y_fixs_true, y_pred)
+        loss = loss_fn(y_true, y_pred)
     gradients = tape.gradient(loss, model.trainable_variables)
     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
     return y_pred, loss
 
 @tf.function
-def val_step(images, y_true, y_fixs_true, model, loss_fn):
+def val_step(images, y_true, model, loss_fn):
     y_pred = model(images)
-    loss = loss_fn(y_true, y_fixs_true, y_pred)
+    loss = loss_fn(y_true, y_pred)
     return y_pred, loss
 
 @tf.function
@@ -120,38 +120,28 @@ def train_model(ds_name, encoder, paths):
     loss_fn = globals().get(loss_fn_name, None)
     optimizer = tf.keras.optimizers.Adam(config.PARAMS["learning_rate"])
 
-    metrics = config.PARAMS["metrics"]
-    train_metrics = {}
-    val_metrics = {}
-    for name in metrics:
-        train_metrics[name] = tf.keras.metrics.Mean(name="train_%s"%name)
-        val_metrics[name] = tf.keras.metrics.Mean(name="val_%s"%name)
-
-    met_to_ckpt_kwargs = lambda phase, met: list(map(lambda x: ("%s_%s"%(phase,x[0]), x[1]), met.items()))
-    metrics_as_ckpt_kwargs = dict(met_to_ckpt_kwargs("train", train_metrics) + met_to_ckpt_kwargs("val", val_metrics))
+    train_metric = tf.keras.metrics.Mean(name="train_loss")
+    val_metric = tf.keras.metrics.Mean(name="val_loss")
 
     ckpts_path = paths["ckpts"] + "%s/%s/%s/" % (encoder, ds_name, loss_fn_name)
-    ckpt = tf.train.Checkpoint(net=model, **metrics_as_ckpt_kwargs)
-    ckpt_manager = tf.train.CheckpointManager(ckpt, ckpts_path, max_to_keep=n_epochs,
-                                                checkpoint_name="%s_ckpt"%("_".join(sorted(metrics))))
+    ckpt = tf.train.Checkpoint(net=model, train_metric=train_metric, val_metric=val_metric)
+    ckpt_manager = tf.train.CheckpointManager(ckpt, ckpts_path, max_to_keep=n_epochs)
     start_epoch = 0
     
     # if a checkpoint exists, restore the latest checkpoint.
     if ckpt_manager.latest_checkpoint:
         ckpt.restore(ckpt_manager.latest_checkpoint).assert_consumed()
-        for name in metrics:
-            train_metrics[name].reset_states()
-            val_metrics[name].reset_states()
         start_epoch = int(ckpt_manager.latest_checkpoint.split('-')[-1])
         print ('Checkpoint restored:\n{}'.format(ckpt_manager.latest_checkpoint))
+        train_metric.reset_states()
+        val_metric.reset_states()
 
     print("\n>> Start training model on %s..." % ds_name.upper())
     print(("Training details:" +
     "\n{0:<4}Number of epochs: {n_epochs:d}" +
     "\n{0:<4}Batch size: {batch_size:d}" +
     "\n{0:<4}Learning rate: {learning_rate:.1e}" +
-    "\n{0:<4}Loss function: {1}" +
-    "\n{0:<4}Metrics: {2}").format(" ", loss_fn_name, ", ".join(metrics), **config.PARAMS))
+    "\n{0:<4}Loss function: {1}").format(" ", loss_fn_name, **config.PARAMS))
     print("_" * 65)
     if ds_name == "salicon" and start_epoch < 2:
         model.freeze_unfreeze_encoder_trained_layers(True)
@@ -159,28 +149,27 @@ def train_model(ds_name, encoder, paths):
         if ds_name == "salicon" and epoch == 2:
             model.freeze_unfreeze_encoder_trained_layers(False)
 
-        train_progbar = Progbar(n_train, stateful_metrics=metrics)
-        for train_x, train_fixs, train_y_true, train_ori_sizes, train_filenames in train_ds:
-            train_y_pred, train_loss = train_step(train_x, train_y_true, train_fixs, model, loss_fn, optimizer)
-            _update_metrics(train_metrics, train_y_true, train_fixs, train_y_pred, train_loss)
-            train_progbar.add(train_x.shape[0], list(map(lambda x: (x[0],x[1].result()), train_metrics.items())))
+        train_progbar = Progbar(n_train, stateful_metrics=["train_loss"])
+        for train_x, train_y_true, train_ori_sizes, train_filenames in train_ds:
+            train_y_pred, train_loss = train_step(train_x, train_y_true, model, loss_fn, optimizer)
+            train_metric(train_loss)
+            train_progbar.add(train_x.shape[0], [("train_loss", train_metric.result())])
 
-        val_progbar = Progbar(n_val, stateful_metrics=metrics)
-        for val_x, val_fixs, val_y_true, val_ori_sizes, val_filenames in val_ds:
-            val_y_pred, val_loss = val_step(val_x, val_y_true, val_fixs, model, loss_fn)
-            _update_metrics(val_metrics, val_y_true, val_fixs, val_y_pred, val_loss)
-            val_progbar.add(val_x.shape[0], list(map(lambda x: (x[0],x[1].result()), val_metrics.items())))
+        val_progbar = Progbar(n_val, stateful_metrics=["val_loss"])
+        for val_x, val_y_true, val_ori_sizes, val_filenames in val_ds:
+            val_y_pred, val_loss = val_step(val_x, val_y_true, model, loss_fn)
+            val_metric(val_loss)
+            val_progbar.add(val_x.shape[0], [("val_loss", val_metric.result())])
 
-        train_metrics_results = _print_metrics("t",train_metrics)
-        val_metrics_results = _print_metrics("v",val_metrics)
+        train_metrics_results = _print_metrics({"train_loss": train_metric})
+        val_metrics_results = _print_metrics({"val_loss": val_metric})
         print('Epoch {} - {} - {}'.format(epoch+1, train_metrics_results, val_metrics_results))
         
         ckpt_manager.save()
 
         # Reset the metrics for the next epoch
-        for name in metrics:
-            train_metrics[name].reset_states()
-            val_metrics[name].reset_states()
+        train_metric.reset_states()
+        val_metric.reset_states()
 
     # Picking best result
     print(">> Picking best result")
@@ -189,12 +178,12 @@ def train_model(ds_name, encoder, paths):
     for i, checkpoint in enumerate(ckpt_manager.checkpoints):
         ckpt.restore(checkpoint).assert_consumed()
 
-        train_metrics_results = _print_metrics("t",train_metrics)
-        val_metrics_results = _print_metrics("v",val_metrics)
+        train_metrics_results = _print_metrics({"train_loss": train_metric})
+        val_metrics_results = _print_metrics({"val_loss": val_metric})
         print('Epoch {} - {} - {}'.format(i+1, train_metrics_results, val_metrics_results))
-        val_loss_result = val_metrics[loss_fn_name].result()
+        val_loss_result = val_metric.result()
         if min_val_loss is None or min_val_loss > val_loss_result:
-            min_train_loss = train_metrics[loss_fn_name].result()
+            min_train_loss = train_metric.result()
             min_val_loss = val_loss_result
             min_index = i
     
@@ -244,7 +233,7 @@ def test_model(ds_name, encoder, paths, categorical=False):
     for test_images, test_ori_sizes, test_filenames in test_ds:
         pred = test_step(test_images, model)
         for pred, filename, ori_size in zip(pred, test_filenames.numpy(), test_ori_sizes):
-            img = data.postprocess_saliency_map(pred, ori_size)
+            img = data.postprocess_saliency_map(pred, ori_size, as_image=True)
             tf.io.write_file(results_path + filename.decode("utf-8"), img)
         test_progbar.add(test_images.shape[0])
 
@@ -279,8 +268,6 @@ def eval_results(ds_name, encoder, paths):
     model.summary()
 
     # Preparing
-    loss_fn = globals().get(loss_fn_name, None)
-
     metrics = config.PARAMS["metrics"]
     eval_metrics = {}
     for name in metrics:
@@ -294,21 +281,27 @@ def eval_results(ds_name, encoder, paths):
     eval_progbar = Progbar(n_eval, stateful_metrics=metrics)
     categorical = config.SPECS[ds_name].get("categorical", False)
     cat_metrics = {}
+    results_path = paths["results"] + "%s/%s/%s/" % (ds_name, encoder, loss_fn_name)
     for eval_x, eval_fixs, eval_y_true, eval_ori_sizes, eval_filenames in eval_ds:
-        eval_y_pred, eval_loss = val_step(eval_x, eval_y_true, eval_fixs, model, loss_fn)
-        if categorical:
-            cat = "/".join(eval_filenames[0].numpy().decode("utf-8").split("/")[:-1])
-            if not cat in cat_metrics:
-                cat_metrics[cat] = {}
-                for name in metrics:
-                    cat_metrics[cat][name] = tf.keras.metrics.Mean(name="%s_%s"%(cat,name))
-            _update_metrics(cat_metrics[cat], eval_y_true, eval_fixs, eval_y_pred, eval_loss)
-        _update_metrics(eval_metrics, eval_y_true, eval_fixs, eval_y_pred, eval_loss)
+        eval_y_pred = test_step(eval_x, model)
+        for pred, y_true, fixs, filename, ori_size in zip(eval_y_pred, eval_fixs, eval_y_true, eval_filenames.numpy(), eval_ori_sizes):
+            pred = tf.expand_dims(data.postprocess_saliency_map(pred, ori_size), axis=0)
+            fixs = tf.expand_dims(fixs, axis=0)
+            y_true = tf.expand_dims(y_true, axis=0)
+            
+            if categorical:
+                cat = "/".join(filename.decode("utf-8").split("/")[:-1])
+                if not cat in cat_metrics:
+                    cat_metrics[cat] = {}
+                    for name in metrics:
+                        cat_metrics[cat][name] = tf.keras.metrics.Mean(name="%s_%s"%(cat,name))
+                _update_metrics(cat_metrics[cat], y_true, fixs, pred)
+            _update_metrics(eval_metrics, y_true, fixs, pred)
         eval_progbar.add(eval_x.shape[0], list(map(lambda x: (x[0],x[1].result()), eval_metrics.items())))
 
     for cat, cat_met in cat_metrics.items():
-        print('Results ({}): {}'.format(cat, _print_metrics("v", cat_met)))
-    print('Results All: {}'.format(_print_metrics("v", eval_metrics)))
+        print('Results ({}): {}'.format(cat, _print_metrics(cat_met)))
+    print('Results All: {}'.format(_print_metrics(eval_metrics)))
 
 
 def main():
@@ -342,7 +335,7 @@ def main():
             "args": ("-e", "--encoder"),
             "kwargs": {
                 "metavar": "ENCODER", "choices": encoders_list, "default": encoders_list[0],
-                "help": "specify the action (available: %s)" % " or ".join(encoders_list)}},
+                "help": "specify the encoder (available: %s)" % " or ".join(encoders_list)}},
         "path": {
             "args": ("-p", "--path"),
             "kwargs": {

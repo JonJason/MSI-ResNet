@@ -141,12 +141,12 @@ class MyModel(Model):
 
     def freeze_unfreeze_encoder_trained_layers(self, freeze=True):
         encoder_name = self._encoder_name
-        # if(encoder_name == "atrous_resnet"):
-        #     n_of_trained_layers = 81
-        # elif(encoder_name == "atrous_xception"):
-        #     n_of_trained_layers = 32
-        # elif(encoder_name == "ml_atrous_vgg"):
-        #     n_of_trained_layers = 14
+        if(encoder_name == "atrous_resnet"):
+            n_of_trained_layers = 81
+        elif(encoder_name == "atrous_xception"):
+            n_of_trained_layers = 32
+        elif(encoder_name == "ml_atrous_vgg"):
+            n_of_trained_layers = 14
         
-        # for layer in self.encoder.layers[:n_of_trained_layers]:
-        #     layer.trainable = (not freeze)
+        for layer in self.encoder.layers[:n_of_trained_layers]:
+            layer.trainable = (not freeze)

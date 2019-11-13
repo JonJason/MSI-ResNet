@@ -5,7 +5,7 @@
 """
 
 PARAMS = {
-    "n_epochs": 10,
+    "n_epochs": 5,
     "batch_size": 10,
     "learning_rate": 1e-5,
     "loss_fn": "kld",
@@ -37,4 +37,12 @@ SPECS = {
         "categorical": True,
         "n_category": 20
     }
+}
+# "m" for map and "p" for points
+MET_SPECS = {
+    "kld": "m",
+    "cc": "m",
+    "kl_cc": "m",
+    "nss": "p",
+    "auc_borji": "p"
 }

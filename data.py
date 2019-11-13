@@ -30,34 +30,30 @@ def load_train_dataset(ds_name, data_path):
         raise NotImplementedError('Either "has_val" or "val_portion" must be specified in dataset configuration')
 
     train_imgs_dir = data_path + "stimuli"
-    train_fixs_dir = data_path + "fixations"
     train_maps_dir = data_path + "maps"
 
     if has_val:
         n_val = spec["n_val"]
         train_imgs_dir += "/train"
-        train_fixs_dir += "/train"
         train_maps_dir += "/train"
     else:
         n_val = math.floor(n_train * spec["val_portion"])
     
     # loading dataset
     train_x = _get_file_list(train_imgs_dir, category_depth)
-    train_fixs = _get_file_list(train_fixs_dir, category_depth)
     train_y = _get_file_list(train_maps_dir, category_depth)
-    _check_consistency(zip(train_x, train_fixs, train_y), n_train)
-    train_ds = tf.data.Dataset.from_tensor_slices((train_x, train_fixs, train_y))
+    _check_consistency(zip(train_x, train_y), n_train)
+    train_ds = tf.data.Dataset.from_tensor_slices((train_x, train_y))
 
     # if has a separate validation set: load them
     # else: take a certain portion from train dataset 
     if has_val:
         train_ds = train_ds.shuffle(n_train, reshuffle_each_iteration=False)
         val_x = _get_file_list(data_path + "stimuli/val", category_depth)
-        val_fixs = _get_file_list(data_path + "fixations/val", category_depth)
         val_y = _get_file_list(data_path + "maps/val", category_depth)
-        _check_consistency(zip(val_x, val_fixs, val_y), n_val)
+        _check_consistency(zip(val_x, val_y), n_val)
 
-        val_ds = tf.data.Dataset.from_tensor_slices((val_x, val_fixs, val_y))
+        val_ds = tf.data.Dataset.from_tensor_slices((val_x, val_y))
         val_ds = val_ds.shuffle(n_val, reshuffle_each_iteration=False)
     else:
         if category_depth > 0:
@@ -118,23 +114,23 @@ def load_eval_dataset(ds_name, data_path, categorical=False):
     n_eval = spec["n_val"] if has_val else spec["n_train"]
 
     eval_imgs_dir = data_path + "stimuli"
-    eval_fixs_dir = data_path + "fixations"
     eval_maps_dir = data_path + "maps"
+    eval_fixs_dir = data_path + "fixations"
 
     if has_val:
         eval_imgs_dir += "/val"
-        eval_fixs_dir += "/val"
         eval_maps_dir += "/val"
+        eval_fixs_dir += "/val"
     
     eval_x = _get_file_list(eval_imgs_dir, category_depth)
-    eval_fixs = _get_file_list(eval_fixs_dir, category_depth)
     eval_y = _get_file_list(eval_maps_dir, category_depth)
-    _check_consistency(zip(eval_x, eval_fixs, eval_y), n_eval)
-    eval_ds = tf.data.Dataset.from_tensor_slices((eval_x, eval_fixs, eval_y))
-    eval_ds = _prepare_image_ds(eval_ds, ds_name, input_size, category_depth, one_at_a_time=True)
+    eval_fixs = _get_file_list(eval_fixs_dir, category_depth)
+    _check_consistency(zip(eval_x, eval_y, eval_fixs), n_eval)
+    eval_ds = tf.data.Dataset.from_tensor_slices((eval_x, eval_y, eval_fixs))
+    eval_ds = _prepare_image_ds(eval_ds, ds_name, input_size, category_depth)
     return (eval_ds, n_eval)
 
-def postprocess_saliency_map(saliency_map, target_size):
+def postprocess_saliency_map(saliency_map, target_size, as_image=False):
     """This function resizes and crops a single saliency map to the original
        dimensions of the input image. The output is then encoded as a jpeg
        file suitable for saving to disk.
@@ -154,11 +150,13 @@ def postprocess_saliency_map(saliency_map, target_size):
 
     saliency_map = _restore_size(saliency_map, target_size)
 
-    saliency_map = tf.image.convert_image_dtype(saliency_map, tf.uint8)
+    if as_image:
+        saliency_map = tf.image.convert_image_dtype(saliency_map, tf.uint8)
 
-    saliency_map_jpeg = tf.image.encode_jpeg(saliency_map, "grayscale", quality=100)
-
-    return saliency_map_jpeg
+        saliency_map_jpeg = tf.image.encode_jpeg(saliency_map, "grayscale", quality=100)
+        return saliency_map_jpeg
+    else:
+        return saliency_map
 
 def _prepare_image_ds(ds, ds_name, input_size, category_depth, one_at_a_time=False):
     """Here the list of file directories is shuffled (only when training),
@@ -208,18 +206,22 @@ def _parse_inputs(filepaths, ds_name, target_size, category_depth):
     
     
     for i, filename in enumerate(filepaths):
-        image = tf.cond(tf.strings.regex_full_match(filename, r".*\.mat"),
-            lambda: tf.numpy_function(_load_mat, [filename, ds_name, target_size], tf.float32),
+        # fixation or not
+        if i == 2:
+            image = tf.cond(tf.strings.regex_full_match(filename, r".*\.mat"),
+                lambda: tf.numpy_function(_load_mat, [filename, ds_name], tf.float32),
+                lambda: _load_image(filename, target_size, is_fixs_map=True, channels=1, resize=False))
+        else:
             # i == 0 is the stimuli, hence n of channels is 3
-            lambda: _load_image(filename, target_size, is_fixs_map = i==1, channels = 3 if i==0 else 1))
+            image, ori_size = _load_image(filename, target_size,
+                                        channels = 3 if i==0 else 1,
+                                        resize= not (len(filepaths)==3 and i==1))
         data_list.append(image)
 
     # if it is the stimuli, transform to 0 - 255 to comply with the input formats
     data_list[0] = data_list[0] * 255
-        
-    # original size
-    data_list.append(tf.shape(data_list[0])[:2])
 
+    data_list.append(ori_size)
     output_filename = tf.strings.split(filepaths[0], '\\')[-(category_depth + 1):]
     data_list.append(tf.strings.reduce_join(output_filename, axis=0, separator="/"))
 
@@ -289,60 +291,56 @@ def _check_consistency(zipped_file_lists, n_total_files):
 
         assert len(set(file_names)) == 1, "File name mismatch"
 
-def _load_mat(filename, ds_name, target_size):
+def _load_mat(filename, ds_name):
     fixs = scipy.io.loadmat(filename)
 
-    image = _get_fixation_map(fixs, ds_name.decode("utf-8"), target_size)
+    image = _get_fixation_map(fixs, ds_name.decode("utf-8"))
     image = np.expand_dims(image, axis=0 if backend.image_data_format() == 'channels_first' else -1)
     return image
 
 @tf.function
-def _load_image(filename, target_size, channels=0, is_fixs_map=False):
+def _load_image(filename, target_size, channels=0, is_fixs_map=False, resize=True):
     image_str = tf.io.read_file(filename)
 
     image = tf.cond(tf.image.is_jpeg(image_str),
         lambda: tf.image.decode_jpeg(image_str, channels=channels),
         lambda: tf.image.decode_png(image_str, channels=channels))
-    
+    ori_size = tf.shape(image)[:2]
     # from int value (0 - 255) to float value (0 - 1)
     image = tf.image.convert_image_dtype(image, tf.float64)
 
     if is_fixs_map:
-        image = tf.numpy_function(_locate_fix_map, [image, target_size], tf.float32)
+        image = tf.numpy_function(_locate_fix_map, [image], tf.float32)
     else:
-        image = tf.image.resize_with_pad(image, target_size[0], target_size[1], method=tf.image.ResizeMethod.AREA)
-    
+        if resize:
+            image = tf.image.resize_with_pad(image, target_size[0], target_size[1], method=tf.image.ResizeMethod.AREA)
+        else:
+            image = tf.cast(image, tf.float32)
+        
     if backend.image_data_format() == 'channels_first':
         image = tf.transpose(image, (2, 0, 1))
     
-    return image
+    if is_fixs_map:
+        return image
+    else:
+        return image, ori_size
 
-def _locate_fix_map(image, target_size):
+def _locate_fix_map(image):
     image.shape = image.shape[:-1]
-    coords = np.argwhere(image>0.5)
-    image = _resize_with_pad_fixation(coords, np.array(target_size), np.array(image.shape))
+    image = (image>0.5).astype("float32")
     image = np.expand_dims(image, axis=-1)
     return image
 
-def _resize_with_pad_fixation(coords, target_size, ori_size, flip=False):
-    factor = np.min(target_size / ori_size)
-    offset = ((target_size - ori_size * factor) / 2).astype("int32")
-    coords = ((coords - 1) * factor).astype("int32")
-    coords = coords[:,::-1] if flip else coords
-    ims = np.zeros(target_size, dtype=np.float32)
-    idxs = np.transpose(coords + offset)
-    ims[idxs[0],idxs[1]] = 1
-    return ims
-
-def _get_fixation_map(fixs, ds_name, target_size):
+def _get_fixation_map(fixs, ds_name):
     if ds_name == "salicon":
-        return _resize_with_pad_fixation(np.array([coord for gaze in fixs["gaze"] for coord in gaze[0][2]]),
-                                        np.array(target_size),
-                                        np.array(fixs["resolution"][0]),
-                                        flip=True)
+        coords = np.array([coord for gaze in fixs["gaze"] for coord in gaze[0][2]]) - 1
+        coords = (coords).astype("int32")
+        coords = coords[:,::-1]
+        image = np.zeros(fixs["resolution"][0], dtype=np.float32)
+        idxs = np.transpose(coords)
+        image[idxs[0],idxs[1]] = 1
+        return image
     elif ds_name == "cat2000":
-        return _resize_with_pad_fixation(np.argwhere(fixs["fixLocs"] > 0.5),
-                                        np.array(target_size),
-                                        np.array(fixs["fixLocs"].shape))
+        return fixs["fixLocs"]
     else:
         raise ValueError("Coordinates parser for %s has not been declared"%ds_name)
