@@ -222,7 +222,8 @@ def _parse_inputs(filepaths, ds_name, target_size, category_depth):
     data_list[0] = data_list[0] * 255
 
     data_list.append(ori_size)
-    output_filename = tf.strings.split(filepaths[0], '\\')[-(category_depth + 1):]
+    output_filename = tf.strings.regex_replace(filepaths[0], '\\\\', '/')
+    output_filename = tf.strings.split(output_filename, '/')[-(category_depth + 1):]
     data_list.append(tf.strings.reduce_join(output_filename, axis=0, separator="/"))
 
     return data_list

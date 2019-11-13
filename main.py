@@ -362,7 +362,11 @@ def main():
         for cmd_arg in cmd_opt["args"]:
             sub_command_parser.add_argument(*args_opts[cmd_arg]["args"], **args_opts[cmd_arg]["kwargs"])
 
-    args = parser.parse_args()
+    try:
+        args = parser.parse_args()
+    except:
+        parser.print_help()
+        exit(2)
     encoder_name = args.encoder
     action = args.action
 

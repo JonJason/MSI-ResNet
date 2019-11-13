@@ -15,9 +15,8 @@ def kld(y_true, y_pred, eps=1e-7):
 
 def nss(y_fixs_true, y_pred):
     y_pred *= 255
-    y_fixs_true *= 255
     y_pred = _normalize(y_pred)
-    return tf.reduce_mean(y_pred * y_fixs_true)
+    return tf.reduce_mean(tf.gather_nd(y_pred, tf.where(y_fixs_true == 1)))
 
 def cc(y_true, y_pred):
     y_true = _normalize(y_true)
