@@ -353,6 +353,8 @@ def main():
                 "help":"specify wether the summary of nested model would like to be shown as well."}}}
 
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("-L", "--limit-thread", action="store_true",
+                        help="speficiy wether to limit the thread to 1 or not") 
     
     subparsers = parser.add_subparsers( dest="action", metavar="ACTION",
                                         required=True, parser_class=argparse.ArgumentParser)
@@ -369,6 +371,10 @@ def main():
         exit(2)
     encoder_name = args.encoder
     action = args.action
+
+    if args.limit_thread:
+        tf.config.threading.set_intra_op_parallelism_threads(1)
+        tf.config.threading.set_inter_op_parallelism_threads(1)
 
     if action == "train":
         train_model(args.data, encoder_name, define_paths(current_path, args))
