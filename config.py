@@ -46,3 +46,5 @@ MET_SPECS = {
     "nss": "p",
     "auc_borji": "p"
 }
+
+THREAD_LIMIT = 4

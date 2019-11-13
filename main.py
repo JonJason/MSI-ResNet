@@ -373,8 +373,8 @@ def main():
     action = args.action
 
     if args.limit_thread:
-        tf.config.threading.set_intra_op_parallelism_threads(1)
-        tf.config.threading.set_inter_op_parallelism_threads(1)
+        tf.config.threading.set_intra_op_parallelism_threads(config.THREAD_LIMIT)
+        tf.config.threading.set_inter_op_parallelism_threads(config.THREAD_LIMIT)
 
     if action == "train":
         train_model(args.data, encoder_name, define_paths(current_path, args))
