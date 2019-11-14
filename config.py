@@ -36,6 +36,13 @@ SPECS = {
         "input_size": (216, 384),
         "categorical": True,
         "n_category": 20
+    },
+    "cu288": {
+        "n_train": 288,
+        "val_portion": 0.2,
+        "input_size": (360, 360),
+        "categorical": True,
+        "n_category": 16
     }
 }
 # "m" for map and "p" for points
