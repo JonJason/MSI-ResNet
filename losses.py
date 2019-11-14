@@ -73,7 +73,7 @@ def auc_borji(y_fixs_true, y_pred, n_splits=100, step=0.1, eps=1e-7):
 def kld_cc(y_true, y_pred):
     kld_score = kld(y_true, y_pred)
     cc_score = cc(y_true, y_pred)
-    return kld_score - cc_score + 2
+    return kld_score - cc_score + 1
 
 def _normalize(x):
     x = x - tf.reduce_mean(x, axis=(1, 2, 3), keepdims=True)
