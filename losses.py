@@ -37,7 +37,7 @@ def auc_borji(y_fixs_true, y_pred, n_splits=100, step=0.1, eps=1e-7):
     y_fixs_true = tf.reshape(y_fixs_true, new_shape)
 
     scores = tf.zeros([y_pred.shape[0]],dtype=y_pred.dtype)
-    for i in range(y_pred.shape[0]):
+    for i in range(scores.shape[0]):
         s = tf.reshape(y_pred[i], [-1])
         f = tf.reshape(y_fixs_true[i], [-1])
         s_th = tf.gather_nd(s, tf.where(f > 0))
@@ -47,11 +47,17 @@ def auc_borji(y_fixs_true, y_pred, n_splits=100, step=0.1, eps=1e-7):
         # for each fixation, sample Nsplits values from anywhere on the sal map
         r = tf.random.uniform([n_splits, n_fixs], maxval=n_pxs-1, dtype=tf.int32)
         
-        auc = tf.zeros([r.shape[0]],dtype=y_pred.dtype)
+        auc = tf.zeros([n_splits],dtype=y_pred.dtype)
         
-        for j in range(r.shape[0]):
+        for j in range(n_splits):
             curfix = tf.gather(s, tf.gather(r, j))
             threshes = tf.reverse(tf.range(0, tf.reduce_max(tf.maximum(s_th,curfix))+step, delta=step), [0])
+
+            # rounding threshes as workaround to imprecision of tf.range of float
+            _dec_factor = 1/step
+            threshes = tf.round(threshes * _dec_factor) / _dec_factor
+
+            # continue
             tp_over_occurrences = tf.cast(tf.reshape(s_th, [1, -1]) >= tf.reshape(threshes, [-1,1]), tf.int32)
             tp = tf.cast(tf.reduce_sum(tp_over_occurrences, axis=1)/n_fixs, tf.float32)
             fp_over_occurrences = tf.cast(tf.reshape(curfix, [1, -1]) >= tf.reshape(threshes, [-1,1]), tf.int32)
