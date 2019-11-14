@@ -195,6 +195,8 @@ def train_model(ds_name, encoder, paths):
     # Saving model's weights
     print(">> Saving model's weights")
     dest_path = paths["weights"] + w_filename_template % (encoder, ds_name, loss_fn_name)
+    if min_index < 2:
+        model.freeze_unfreeze_encoder_trained_layers(False)
     model.save_weights(dest_path)
     print("weights are saved to:\n%s" % dest_path)
 

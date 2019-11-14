@@ -67,8 +67,8 @@ def load_train_dataset(ds_name, data_path):
                     val_ds = cat_train_ds.take(n_val_per_cat)
                     new_train_ds = cat_train_ds.skip(n_val_per_cat)
                 else:
-                    val_ds.concatenate(cat_train_ds.take(n_val_per_cat))
-                    new_train_ds.concatenate(cat_train_ds.skip(n_val_per_cat))
+                    val_ds = val_ds.concatenate(cat_train_ds.take(n_val_per_cat))
+                    new_train_ds = new_train_ds.concatenate(cat_train_ds.skip(n_val_per_cat))
                 train_ds = train_ds.skip(n_per_cat)
             train_ds = new_train_ds
         else:
