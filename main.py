@@ -315,7 +315,7 @@ def main():
     current_path = os.path.dirname(os.path.realpath(__file__))
     default_data_path = current_path + "/data"
 
-    datasets_list = ["salicon", "mit1003", "cat2000", "custom"]
+    datasets_list = list(config.SPECS.keys())
     encoders_list = ["atrous_resnet", "atrous_xception", "ml_atrous_vgg"]
     commands_dict = {"train":{"help": "train the model",
                               "args": ["encoder", "data", "path"]},

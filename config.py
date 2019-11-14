@@ -54,4 +54,4 @@ MET_SPECS = {
     "auc_borji": "p"
 }
 
-THREAD_LIMIT = 4
+THREAD_LIMIT = 8
