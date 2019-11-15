@@ -187,11 +187,24 @@ def download_pretrained_weights(dest_path, encoder, ds_name, loss_fn_name):
     ids = {
         "atrous_resnet": {
             "salicon": {
-                "kld":"1u5lQXjS9JY5vLFnzItpw6mOlbAWx5p2p"
+                "kld":"1u5lQXjS9JY5vLFnzItpw6mOlbAWx5p2p",
+                "kld_cc": "15S4AY9D87GPfs5jj2x260CNGuXBZ76-M"
             },
             "mit1003": {
                 "kld":"150g8MsiAlYEW338LD0hK2OikrW-FWbrn"
+            },
+            "cat2000":{
+            },
+            "cu288": {
+                "kld": "1BTSfo8b4et1QsBK-gtjFI6vUj8ZbVS_h"
             }
+        },
+        "ml_atrous_vgg": {
+            "salicon": {
+                "kld": "1n34GmSLUxoGduSezYMRO3M2PcJ_jw1gb",
+                "kld_cc": "1BvzrEwh68iKadMo5dCrhMahHMA3QeYHY"
+            },
+            "mit3000": "1LxBc1x4Dv-Fjpdo88w5ZO7Yn_vMMQeGw"
         }
     }
 

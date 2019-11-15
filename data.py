@@ -60,6 +60,7 @@ def load_train_dataset(ds_name, data_path):
             n_category = spec["n_category"]
             n_per_cat = n_train // n_category
             n_val_per_cat = math.floor(n_per_cat * spec["val_portion"])
+            n_val = n_val_per_cat * n_category
             for i in range(n_category):
                 cat_train_ds = train_ds.take(n_per_cat)
                 cat_train_ds = cat_train_ds.shuffle(n_per_cat)

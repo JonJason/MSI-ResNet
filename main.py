@@ -18,12 +18,19 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 logging.getLogger("tensorflow").setLevel(logging.ERROR)
 loss_fn_name = config.PARAMS["loss_fn"]
 
-def _update_metrics(metrics, y_true, y_fixs_true, y_pred):
-    for name, metric in metrics.items():
+def _update_metrics(metrics_wrapper, y_true, y_fixs_true, y_pred):
+    for name, value in _calc_metrics(metrics_wrapper.keys(), y_true, y_fixs_true, y_pred).items():
+        metrics_wrapper[name](value)
+
+def _calc_metrics(metrics, y_true, y_fixs_true, y_pred):
+    d = {}
+    for name in metrics:
         inputs = []
         inputs.append(y_true if config.MET_SPECS[name] == "m" else y_fixs_true)
         inputs.append(y_pred)
-        metric(globals().get(name, None)(*inputs))
+        d[name] = (globals().get(name, None)(*inputs))
+    return d
+
 
 def _print_metrics(res_metrics):
     res_printer = lambda x: "{}: {}".format(x[0], ('%.4f' if x[1].result() > 1e-3 else '%.4e') % x[1].result())
@@ -271,19 +278,15 @@ def eval_results(ds_name, encoder, paths):
 
     # Preparing
     metrics = config.PARAMS["metrics"]
-    eval_metrics = {}
-    for name in metrics:
-        eval_metrics[name] = tf.keras.metrics.Mean(name="eval_%s"%name)
 
     print("\n>> Start evaluating model on %s..." % ds_name.upper())
     print(("Evaluation details:" +
     "\n{0:<4}Metrics: {2}").format(" ", loss_fn_name, ", ".join(metrics), **config.PARAMS))
     print("_" * 65)
 
-    eval_progbar = Progbar(n_eval, stateful_metrics=metrics)
+    eval_progbar = Progbar(n_eval)
     categorical = config.SPECS[ds_name].get("categorical", False)
     cat_metrics = {}
-    results_path = paths["results"] + "%s/%s/%s/" % (ds_name, encoder, loss_fn_name)
     for eval_x, eval_fixs, eval_y_true, eval_ori_sizes, eval_filenames in eval_ds:
         eval_y_pred = test_step(eval_x, model)
         for pred, y_true, fixs, filename, ori_size in zip(eval_y_pred, eval_fixs, eval_y_true, eval_filenames.numpy(), eval_ori_sizes):
@@ -298,12 +301,10 @@ def eval_results(ds_name, encoder, paths):
                     for name in metrics:
                         cat_metrics[cat][name] = tf.keras.metrics.Mean(name="%s_%s"%(cat,name))
                 _update_metrics(cat_metrics[cat], y_true, fixs, pred)
-            _update_metrics(eval_metrics, y_true, fixs, pred)
-        eval_progbar.add(eval_x.shape[0], list(map(lambda x: (x[0],x[1].result()), eval_metrics.items())))
+        eval_progbar.add(eval_x.shape[0], _calc_metrics(metrics, y_true, fixs, pred).items())
 
     for cat, cat_met in cat_metrics.items():
         print('Results ({}): {}'.format(cat, _print_metrics(cat_met)))
-    print('Results All: {}'.format(_print_metrics(eval_metrics)))
 
 
 def main():
