@@ -1,2 +1,2 @@
-# MSI-ResNet
-This repository contains the implementation of MSI-ResNet within Tensorflow 2
+# A-ResP
+This repository contains the implementation of A-ResP saliency model within Tensorflow 2
