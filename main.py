@@ -69,6 +69,9 @@ def define_paths(current_path, args):
         "ckpts": ckpts_path
     }
 
+    if not args.weights is None:
+        paths["trained_weights"] = current_path + "/" + args.weights
+
     return paths
 
 @tf.function
@@ -113,7 +116,7 @@ def train_model(ds_name, encoder, paths):
     if ds_name != "salicon":
         salicon_weights = paths["weights"] + w_filename_template % (encoder, "salicon", loss_fn_name)
         if os.path.exists(salicon_weights):
-            print("Salicon weights are loaded!")
+            print("Salicon weights are loaded!\n    %s"%salicon_weights)
         else:
             download.download_pretrained_weights(paths["weights"], encoder, "salicon", loss_fn_name)
         model.load_weights(salicon_weights)
@@ -228,7 +231,7 @@ def test_model(ds_name, encoder, paths, categorical=False):
 
     weights_path = paths["weights"] + w_filename_template % (encoder, ds_name, loss_fn_name)
     if os.path.exists(weights_path):
-        print("weights are loaded!")
+        print("Weights are loaded!\n    %s"%weights_path)
     else:
         download.download_pretrained_weights(paths["weights"], encoder, ds_name, loss_fn_name)
     model.load_weights(weights_path)
@@ -266,11 +269,19 @@ def eval_results(ds_name, encoder, paths):
 
     model = MyModel(encoder, ds_name, "train")
 
-    weights_path = paths["weights"] + w_filename_template % (encoder, ds_name, loss_fn_name)
+    if "trained_weights" in paths:
+        if os.path.exists(paths["trained_weights"]):
+            weights_path = paths["trained_weights"]
+        else:
+            raise ValueError("could not find the specified weights file.\n    specified weights: %s"%paths["trained_weights"])
+    else:
+        weights_path = paths["weights"] + w_filename_template % (encoder, ds_name, loss_fn_name)
+
     if os.path.exists(weights_path):
-        print("weights are loaded!")
+        print("Weights are loaded!\n    %s"%weights_path)
     else:
         download.download_pretrained_weights(paths["weights"], encoder, "salicon", loss_fn_name)
+    
     model.load_weights(weights_path)
     del weights_path
 
@@ -325,7 +336,7 @@ def main():
                      "summary":{"help": "show summary of the model", 
                                 "args": ["encoder", "data", "deep"]},
                      "eval":{"help": "eval predict saliency maps predicted by the model",
-                             "args": ["encoder", "data", "path", "categorical"]}}
+                             "args": ["encoder", "data", "path", "categorical", "weights"]}}
 
 
     args_opts = {
@@ -353,7 +364,12 @@ def main():
             "args": ("-D", "--deep"),
             "kwargs": {
                 "action":"store_true",
-                "help":"specify wether the summary of nested model would like to be shown as well."}}}
+                "help":"specify wether the summary of nested model would like to be shown as well."}},
+        "weights": {
+            "args": ("-w", "--weights"),
+            "kwargs": {
+                "metavar": "WEIGHTS",
+                "help": "specify explicitly path to weights file."}}}
 
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("-L", "--limit-thread", action="store_true",
