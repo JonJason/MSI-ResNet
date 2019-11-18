@@ -69,8 +69,9 @@ def define_paths(current_path, args):
         "ckpts": ckpts_path
     }
 
-    if not args.get("weights", None) is None:
-        paths["trained_weights"] = current_path + "/" + args.weights
+    if("weights" in args):
+        if not args.weights is None:
+            paths["trained_weights"] = current_path + "/" + args.weights
 
     return paths
 
