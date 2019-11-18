@@ -39,7 +39,7 @@ SPECS = {
     },
     "cu288": {
         "n_train": 288,
-        "val_portion": 0.2,
+        "val_portion": 0.4,
         "input_size": (360, 360),
         "categorical": True,
         "n_category": 16
