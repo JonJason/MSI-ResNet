@@ -78,24 +78,14 @@ class MyModel(Model):
         branch5 = tf.reduce_mean(input_tensor, axis=self._img_axis, keepdims=True)
         branch5 = Conv2D(256, 1, padding="valid", activation=tf.nn.relu, name="conv1_5")(branch5)
 
-        input_shape = input_tensor.shape.as_list()
-        h_axis = self._img_axis[0]
-        w_axis = self._img_axis[1]
-        
-        if backend.image_data_format() == 'channels_first':
-            branch5 = tf.transpose(branch5, (0, 2, 3, 1))
-
-        branch5 = tf.image.resize(branch5, (input_shape[h_axis], input_shape[w_axis]), method=tf.image.ResizeMethod.BILINEAR)
-
-        if backend.image_data_format() == 'channels_first':
-            branch5 = tf.transpose(branch5, (0, 3, 1, 2))
+        branch5 = branch5 * tf.ones(tf.shape(branches[0]))
 
         branches.append(branch5)
         
         x = Conv2D(256, 1,
-                        padding="same",
-                        activation=tf.nn.relu,
-                        name="conv2")(tf.concat(branches, axis=self._ch_axis))
+                    padding="same",
+                    activation=tf.nn.relu,
+                    name="conv2")(tf.concat(branches, axis=self._ch_axis))
         return Model(input_tensor, x, name="aspp")
 
     def _decoder(self, input_shape=None):
@@ -111,12 +101,12 @@ class MyModel(Model):
         input_tensor = Input(shape=input_shape)
         x = input_tensor
 
-        kernel_sizes = [128, 64, 32]
+        filters_list = [128, 64, 32]
 
-        for i, kernel_size in enumerate(kernel_sizes):            
+        for i, filters in enumerate(filters_list):            
             x = UpSampling2D(2, interpolation="bilinear")(x)
 
-            x = Conv2D(kernel_size, 3, padding="same", activation=tf.nn.relu,
+            x = Conv2D(filters, 3, padding="same", activation=tf.nn.relu,
                         name="conv" + str(i + 1))(x)
 
         x = Conv2D(1, 3, padding="same", name="conv4")(x)

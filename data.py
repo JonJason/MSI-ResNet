@@ -63,7 +63,7 @@ def load_train_dataset(ds_name, data_path):
             n_val = n_val_per_cat * n_category
             for i in range(n_category):
                 cat_train_ds = train_ds.take(n_per_cat)
-                cat_train_ds = cat_train_ds.shuffle(n_per_cat)
+                cat_train_ds = cat_train_ds.shuffle(n_per_cat, reshuffle_each_iteration=False)
                 if i == 0:
                     val_ds = cat_train_ds.take(n_val_per_cat)
                     new_train_ds = cat_train_ds.skip(n_val_per_cat)
