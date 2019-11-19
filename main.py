@@ -305,6 +305,8 @@ def eval_results(ds_name, encoder, paths):
             pred = tf.expand_dims(data.postprocess_saliency_map(pred, ori_size), axis=0)
             fixs = tf.expand_dims(fixs, axis=0)
             y_true = tf.expand_dims(y_true, axis=0)
+
+            met_vals = _calc_metrics(metrics, y_true, fixs, pred)
             
             if categorical:
                 cat = "/".join(filename.decode("utf-8").split("/")[:-1])
@@ -312,10 +314,10 @@ def eval_results(ds_name, encoder, paths):
                     cat_metrics[cat] = {}
                     for name in metrics:
                         cat_metrics[cat][name] = {"sum":0, "count": 0}
-                for name, value in _calc_metrics(metrics, y_true, fixs, pred).items():
+                for name, value in met_vals.items():
                     cat_metrics[cat][name]["sum"] += value
                     cat_metrics[cat][name]["count"] += 1
-        eval_progbar.add(eval_x.shape[0], _calc_metrics(metrics, y_true, fixs, pred).items())
+        eval_progbar.add(eval_x.shape[0], met_vals.items())
 
     for cat, cat_met in cat_metrics.items():
         to_print = []

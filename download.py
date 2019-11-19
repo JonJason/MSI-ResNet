@@ -211,6 +211,7 @@ def download_pretrained_weights(dest_path, encoder, ds_name, loss_fn_name):
                 "kld_cc": "1CXzMdfK75tKo8r1VKxSk-odzGgVh4Iki"
             },
             "cat2000": {
+                "kld": "1EFWY_FUIniGdO1_r81DXkS1UKo3csS6i",
                 "kld_cc": "1U8mjwjM8AqyboOuyhvAeQFUJ9kKcgeYk"
             }
         }
