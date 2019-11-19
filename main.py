@@ -331,13 +331,13 @@ def main():
     datasets_list = list(config.SPECS.keys())
     encoders_list = ["atrous_resnet", "atrous_xception", "ml_atrous_vgg"]
     commands_dict = {"train":{"help": "train the model",
-                              "args": ["encoder", "data", "path"]},
+                              "args": ["path"]},
                      "test":{"help": "predict saliency maps using the model",
-                             "args": ["encoder", "data", "path", "categorical"]},
+                             "args": ["path", "categorical"]},
                      "summary":{"help": "show summary of the model", 
-                                "args": ["encoder", "data", "deep"]},
+                                "args": ["deep"]},
                      "eval":{"help": "eval predict saliency maps predicted by the model",
-                             "args": ["encoder", "data", "path", "categorical", "weights"]}}
+                             "args": ["path", "categorical", "weights"]}}
 
 
     args_opts = {
@@ -345,7 +345,7 @@ def main():
             "args": ("-d", "--data"),
             "kwargs": {
                 "metavar": "DATA", "choices": datasets_list, "default": datasets_list[0],
-                "help": "define which dataset will be used for training or which trained model is used for testing"}},
+                "help": "define which dataset the model will be trained on or which dataset weights to use for testing"}},
         "encoder": {
             "args": ("-e", "--encoder"),
             "kwargs": {
@@ -370,12 +370,17 @@ def main():
             "args": ("-w", "--weights"),
             "kwargs": {
                 "metavar": "WEIGHTS",
-                "help": "specify explicitly path to weights file."}}}
+                "help": "specify explicitly path to weights file."}},
+        "limit-threads": {
+            "args": ("-L", "--limit-threads"),
+            "kwargs": {
+                "action": "store_true",
+                "help": "speficiy wether to limit the thread to 1 or not"}}}
 
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("-L", "--limit-thread", action="store_true",
-                        help="speficiy wether to limit the thread to 1 or not") 
-    
+    parser.add_argument(*args_opts["limit-threads"]["args"], **args_opts["limit-threads"]["kwargs"])
+    parser.add_argument(*args_opts["encoder"]["args"], **args_opts["encoder"]["kwargs"])
+    parser.add_argument(*args_opts["data"]["args"], **args_opts["data"]["kwargs"])
     subparsers = parser.add_subparsers( dest="action", metavar="ACTION",
                                         required=True, parser_class=argparse.ArgumentParser)
     
@@ -392,7 +397,7 @@ def main():
     encoder_name = args.encoder
     action = args.action
 
-    if args.limit_thread:
+    if args.limit_threads:
         tf.config.threading.set_intra_op_parallelism_threads(config.THREAD_LIMIT)
         tf.config.threading.set_inter_op_parallelism_threads(config.THREAD_LIMIT)
 
