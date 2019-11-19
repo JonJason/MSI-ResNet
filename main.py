@@ -311,13 +311,18 @@ def eval_results(ds_name, encoder, paths):
                 if not cat in cat_metrics:
                     cat_metrics[cat] = {}
                     for name in metrics:
-                        cat_metrics[cat][name] = tf.keras.metrics.Mean(name="%s_%s"%(cat,name))
-                _update_metrics(cat_metrics[cat], y_true, fixs, pred)
+                        cat_metrics[cat][name] = {"sum":0, "count": 0}
+                for name, value in _calc_metrics(metrics, y_true, fixs, pred).items():
+                    cat_metrics[cat][name]["sum"] += value
+                    cat_metrics[cat][name]["count"] += 1
         eval_progbar.add(eval_x.shape[0], _calc_metrics(metrics, y_true, fixs, pred).items())
 
     for cat, cat_met in cat_metrics.items():
-        print('Results ({}): {}'.format(cat, _print_metrics(cat_met)))
-
+        to_print = []
+        for name, value in cat_met.items():
+            _mean = value["sum"]/value["count"]
+            to_print.append("{}: {}".format(name, ('%.4f' if _mean > 1e-3 else '%.4e') % _mean))
+        print('Results ({}): {}'.format(cat, " - ".join(to_print)))
 
 def main():
     """The main function reads the command line arguments, invokes the
