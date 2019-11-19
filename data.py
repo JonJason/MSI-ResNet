@@ -343,6 +343,6 @@ def _get_fixation_map(fixs, ds_name):
         image[idxs[0],idxs[1]] = 1
         return image
     elif ds_name == "cat2000":
-        return fixs["fixLocs"]
+        return fixs["fixLocs"].astype("float32")
     else:
         raise ValueError("Coordinates parser for %s has not been declared"%ds_name)
