@@ -195,7 +195,8 @@ def download_pretrained_weights(dest_path, encoder, ds_name, loss_fn_name):
                 "kld_cc": "1n3icbwtQ3hRVuGzuoeWdinPI2futPBiH"
             },
             "cat2000":{
-                "kld": "14OgwPTJQY9s6O41tjOLdOq0705ePSvko"
+                "kld": "14OgwPTJQY9s6O41tjOLdOq0705ePSvko",
+                "kld_cc": "12-5JUauoYAZ_bGLs3FGvpNfkYLXpaOPT"
             },
             "cu288": {
             }
@@ -210,7 +211,7 @@ def download_pretrained_weights(dest_path, encoder, ds_name, loss_fn_name):
                 "kld_cc": "1CXzMdfK75tKo8r1VKxSk-odzGgVh4Iki"
             },
             "cat2000": {
-
+                "kld_cc": "1U8mjwjM8AqyboOuyhvAeQFUJ9kKcgeYk"
             }
         }
     }
