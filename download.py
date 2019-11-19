@@ -191,9 +191,11 @@ def download_pretrained_weights(dest_path, encoder, ds_name, loss_fn_name):
                 "kld_cc": "15S4AY9D87GPfs5jj2x260CNGuXBZ76-M"
             },
             "mit1003": {
-                "kld":"150g8MsiAlYEW338LD0hK2OikrW-FWbrn"
+                "kld":"150g8MsiAlYEW338LD0hK2OikrW-FWbrn",
+                "kld_cc": "1n3icbwtQ3hRVuGzuoeWdinPI2futPBiH"
             },
             "cat2000":{
+                "kld": "14OgwPTJQY9s6O41tjOLdOq0705ePSvko"
             },
             "cu288": {
             }
@@ -204,7 +206,11 @@ def download_pretrained_weights(dest_path, encoder, ds_name, loss_fn_name):
                 "kld_cc": "1BvzrEwh68iKadMo5dCrhMahHMA3QeYHY"
             },
             "mit3000": {
-                "kld": "1LxBc1x4Dv-Fjpdo88w5ZO7Yn_vMMQeGw"
+                "kld": "1LxBc1x4Dv-Fjpdo88w5ZO7Yn_vMMQeGw",
+                "kld_cc": "1CXzMdfK75tKo8r1VKxSk-odzGgVh4Iki"
+            },
+            "cat2000": {
+
             }
         }
     }
