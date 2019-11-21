@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-import argparse
 import os
+import argparse
+import heapq
 
 import logging
 import download
@@ -58,7 +59,7 @@ def define_paths(current_path, args):
     weights_path = current_path + "/weights/"
     ckpts_path = weights_path + "ckpts/"
 
-    if args.action in ["train", "eval"]:
+    if args.action in ["train", "eval", "find_n_high"]:
         if args.data not in data_path:
             data_path += args.data + "/"
 
@@ -326,6 +327,77 @@ def eval_results(ds_name, encoder, paths):
             to_print.append("{}: {}".format(name, ('%.4f' if _mean > 1e-3 else '%.4e') % _mean))
         print('Results ({}): {}'.format(cat, " - ".join(to_print)))
 
+
+
+def find_n_high(ds_name, encoder, paths, n, metric, negate=False):
+    """The main function for executing network training. It loads the specified
+       dataset iterator, saliency model, and helper classes. Training is then
+       performed in a new session by iterating over all batches for a number of
+       epochs. After validation on an independent set, the model is saved and
+       the training history is updated.
+
+    Args:
+        ds_name (str): Denotes the dataset to be used during training.
+        paths (dict, str): A dictionary with all path elements.
+    """
+
+    w_filename_template = "/%s_%s_%s_weights.h5" # [encoder]_[ds_name]_[loss_fn_name]_weights.h5
+    
+    (eval_ds, n_eval) = data.load_eval_dataset(ds_name, paths["data"])
+    
+    print(">> Preparing model with encoder %s..." % encoder)
+
+    model = MyModel(encoder, ds_name, "train")
+
+    if "trained_weights" in paths:
+        if os.path.exists(paths["trained_weights"]):
+            weights_path = paths["trained_weights"]
+        else:
+            raise ValueError("could not find the specified weights file.\n    specified weights: %s"%paths["trained_weights"])
+    else:
+        weights_path = paths["weights"] + w_filename_template % (encoder, ds_name, loss_fn_name)
+
+    if os.path.exists(weights_path):
+        print("Weights are loaded!\n    %s"%weights_path)
+    else:
+        download.download_pretrained_weights(paths["weights"], encoder, "salicon", loss_fn_name)
+    
+    model.load_weights(weights_path)
+    del weights_path
+
+    model.summary()
+
+    # Preparing
+
+    print("\n>> Start finding %d %s results for model on %s..." % (n, "worst" if negate else "best",ds_name.upper()))
+    print(("Evaluation details:" +
+        "\n{0:<4}Metric: {1}").format(" ", metric))
+    print("_" * 65)
+
+    eval_progbar = Progbar(n_eval)
+    min_heap = []
+    count = 0
+    sign = -1 if negate else 1
+    for eval_x, eval_fixs, eval_y_true, eval_ori_sizes, eval_filenames in eval_ds:
+        eval_y_pred = test_step(eval_x, model)
+        for pred, y_true, fixs, filename, ori_size in zip(eval_y_pred, eval_fixs, eval_y_true, eval_filenames.numpy(), eval_ori_sizes):
+            pred = tf.expand_dims(data.postprocess_saliency_map(pred, ori_size), axis=0)
+            fixs = tf.expand_dims(fixs, axis=0)
+            y_true = tf.expand_dims(y_true, axis=0)
+
+            score = _calc_metrics([metric], y_true, fixs, pred)[metric].numpy() * sign
+            
+            if count < n:
+                count+=1
+                heapq.heappush(min_heap, (score, filename.decode("utf-8")))
+            else:
+                heapq.heappushpop(min_heap, (score, filename.decode("utf-8")))
+        eval_progbar.add(eval_x.shape[0])
+    
+    min_heap.sort(reverse=not negate)
+    for s, n in min_heap:
+        print(s, n)
+
 def main():
     """The main function reads the command line arguments, invokes the
        creation of appropriate path variables, and starts the training
@@ -344,7 +416,10 @@ def main():
                      "summary":{"help": "show summary of the model", 
                                 "args": ["deep"]},
                      "eval":{"help": "eval predict saliency maps predicted by the model",
-                             "args": ["path", "categorical", "weights"]}}
+                             "args": ["path", "weights"]},
+                     "find_n_high": {"help": "find n best/worst predictions",
+                             "args": ["path", "weights", "number", "negate", "metric"]
+                     }}
 
 
     args_opts = {
@@ -382,7 +457,23 @@ def main():
             "args": ("-L", "--threads-limit"),
             "kwargs": {
                 "metavar": "THREADS_LIMIT", "type": int, "default": 0,
-                "help": "speficiy wether to limit the thread to 1 or not"}}}
+                "help": "speficiy wether to limit the thread to 1 or not"}},
+        "number": {
+            "args": ("-n", "--number"),
+            "kwargs": {
+                "metavar": "NUMBER", "type": int, "required": True,
+                "help": "speficiy the number of highest score"}},
+        "negate": {
+            "args": ("-N", "--negate"),
+            "kwargs": {
+                "action":"store_true",
+                "help":"negate, e.g. find n lowest for find_n_high."}},
+        "metric": {
+            "args": ("-m", "--metric"),
+            "kwargs": {
+                "metavar": "METRIC", "choices": config.MET_SPECS.keys(), "required": True,
+                "help": "speficiy the metric (available: %s)" % " or ".join(encoders_list)}}
+        }
 
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument(*args_opts["limit-threads"]["args"], **args_opts["limit-threads"]["kwargs"])
@@ -396,11 +487,8 @@ def main():
         for cmd_arg in cmd_opt["args"]:
             sub_command_parser.add_argument(*args_opts[cmd_arg]["args"], **args_opts[cmd_arg]["kwargs"])
 
-    try:
-        args = parser.parse_args()
-    except:
-        parser.print_help()
-        exit(2)
+    args = parser.parse_args()
+    
     encoder_name = args.encoder
     action = args.action
 
@@ -422,6 +510,9 @@ def main():
 
     elif action == "eval":
         eval_results(args.data, encoder_name, define_paths(current_path, args))
+    elif action == "find_n_high":
+        find_n_high(args.data, encoder_name,
+                        define_paths(current_path, args), args.number, args.metric, args.negate)
 
 
 if __name__ == "__main__":
