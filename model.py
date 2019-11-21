@@ -78,7 +78,7 @@ class MyModel(Model):
         branch5 = tf.reduce_mean(input_tensor, axis=self._img_axis, keepdims=True)
         branch5 = Conv2D(256, 1, padding="valid", activation=tf.nn.relu, name="conv1_5")(branch5)
 
-        branch5 = branch5 * tf.ones(tf.shape(branches[0]))
+        branch5 = branch5 * tf.ones(tf.shape(input_tensor))
 
         branches.append(branch5)
         

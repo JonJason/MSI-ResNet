@@ -199,6 +199,8 @@ def download_pretrained_weights(dest_path, encoder, ds_name, loss_fn_name):
                 "kld_cc": "12-5JUauoYAZ_bGLs3FGvpNfkYLXpaOPT"
             },
             "cu288": {
+                "kld": "1BTSfo8b4et1QsBK-gtjFI6vUj8ZbVS_h",
+                "kld_cc": "13p96h_EmIdVpKSktd6a9VkKgB3E99Ym8"
             }
         },
         "ml_atrous_vgg": {
@@ -213,6 +215,10 @@ def download_pretrained_weights(dest_path, encoder, ds_name, loss_fn_name):
             "cat2000": {
                 "kld": "1EFWY_FUIniGdO1_r81DXkS1UKo3csS6i",
                 "kld_cc": "1U8mjwjM8AqyboOuyhvAeQFUJ9kKcgeYk"
+            },
+            "cu288": {
+                "kld": "1AkQL6BD_y2NzGHuKQM12FhbSScN_Ui8j",
+                "kld_cc": "1zSAi_IZPuGX2clMMLmeEFo_3LJYYbjLz"
             }
         }
     }
