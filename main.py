@@ -379,9 +379,9 @@ def main():
                 "metavar": "WEIGHTS",
                 "help": "specify explicitly path to weights file."}},
         "limit-threads": {
-            "args": ("-L", "--limit-threads"),
+            "args": ("-L", "--threads-limit"),
             "kwargs": {
-                "action": "store_true",
+                "metavar": "THREADS_LIMIT", "type": int, "default": 0,
                 "help": "speficiy wether to limit the thread to 1 or not"}}}
 
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -404,9 +404,9 @@ def main():
     encoder_name = args.encoder
     action = args.action
 
-    if args.limit_threads:
-        tf.config.threading.set_intra_op_parallelism_threads(config.THREAD_LIMIT)
-        tf.config.threading.set_inter_op_parallelism_threads(config.THREAD_LIMIT)
+    if args.threads_limit > 0:
+        tf.config.threading.set_intra_op_parallelism_threads(args.threads_limit)
+        tf.config.threading.set_inter_op_parallelism_threads(args.threads_limit)
 
     if action == "train":
         train_model(args.data, encoder_name, define_paths(current_path, args))
