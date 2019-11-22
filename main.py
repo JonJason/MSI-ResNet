@@ -394,7 +394,7 @@ def find_n_high(ds_name, encoder, paths, n, metric, negate=False):
                 heapq.heappushpop(min_heap, (score, filename.decode("utf-8")))
         eval_progbar.add(eval_x.shape[0])
     
-    min_heap.sort(reverse=not negate)
+    min_heap.sort(reverse=True)
     for s, n in min_heap:
         print(s, n)
 
